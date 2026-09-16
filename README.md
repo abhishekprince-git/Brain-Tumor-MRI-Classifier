@@ -18,31 +18,7 @@ This project proposes an automated approach using a **Convolutional Neural Netwo
 
 ---
 
-## 3. Literature Survey
-
-### 3.1 Brain Tumor Detection Using CNN
-
-This survey focuses on CNN architectures for automated brain tumor detection from MRI images. CNNs achieve high accuracy with minimal pre-processing by automatically learning critical features, eliminating the need for manual feature extraction and outperforming traditional methods like SVM for complex medical imaging tasks.
-
-### 3.2 Transfer Learning in Medical Image Analysis
-
-Research shows that transfer learning using pre-trained models like **VGG16** and **ResNet50** significantly improves detection accuracy while reducing computation time. Fine-tuning these models cuts training time by approximately 50% compared to training from scratch, achieving better validation accuracy and minimizing overfitting on limited medical datasets.
-
-### 3.3 Binary Classification Approach for Tumor Detection
-
-Researchers have explored binary classification to distinguish between tumor and non-tumor MRI images, simplifying initial screening with a clear diagnostic output.
-
-These models achieve training accuracy above 97% and validation accuracy of 70–90%, utilizing data augmentation techniques to improve generalization and prevent overfitting.
-
-### 3.4 Comparative Analysis of Deep Learning Models
-
-Comparative research reveals that deeper networks like **ResNet50** outperform simpler models in accuracy and F1 score, as its residual framework prevents degradation in deep networks.
-
-Furthermore, studies highlight the necessity of evaluating **precision, recall, and F1 score** alongside accuracy for a comprehensive assessment in medical diagnostic performance.
-
----
-
-## 4. Tools to Be Used
+## 3. Tools to Be Used
 
 The following tools and technologies are used in this project:
 
@@ -55,9 +31,17 @@ The following tools and technologies are used in this project:
 
 ---
 
-## 5. Expected Outcome
+## 4. Expected Outcome
 
-This project will demonstrate a fully functional brain tumor detection system that can:
+### Live Demo
+
+The Brain Tumor MRI Classifier is deployed on Streamlit.  
+You can access the application and test the model here:
+
+🔗 **[Open the Streamlit App](https://brain-tumor-mri-classifier-msit.streamlit.app/)**
+
+
+This project demonstrates a fully functional brain tumor detection system that can:
 
 - Classify MRI images into **tumor / no-tumor** categories with high accuracy.
 - Reduce diagnosis time from hours to seconds.
@@ -67,29 +51,7 @@ This project will demonstrate a fully functional brain tumor detection system th
 
 ---
 
-## 6. Applications
-
-Brain tumor detection using machine learning has extensive applications in different areas:
-
-### Healthcare and Medical Diagnosis
-
-AI-powered detection software assists radiologists in quickly identifying brain tumors from MRI scans, enabling faster treatment decisions and improving patient outcomes.
-
-### Early Screening Programs
-
-Automated detection systems can be deployed in hospitals and diagnostic centers for mass screening, helping identify tumors at early stages when treatment is most effective.
-
-### Telemedicine and Remote Diagnosis
-
-The system can support healthcare delivery in remote areas where specialist radiologists may not be readily available, enabling preliminary diagnosis and timely referrals.
-
-### Medical Education and Training
-
-The detection system can serve as a training tool for medical students and residents, helping them understand tumor characteristics and improve their diagnostic skills.
-
----
-
-## 7. Challenges
+## 5. Challenges
 
 The major challenges in brain tumor detection from MRI data include:
 
