@@ -1,0 +1,11 @@
+Brain Tumor CNN - Classification Report
+==================================================
+
+               precision    recall  f1-score   support
+
+Non-Tumourous     0.8692    0.9959    0.9282       487
+    Tumourous     0.9989    0.9621    0.9802      1927
+
+     accuracy                         0.9689      2414
+    macro avg     0.9340    0.9790    0.9542      2414
+ weighted avg     0.9727    0.9689    0.9697      2414
