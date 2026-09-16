@@ -22,7 +22,7 @@ This project proposes an automated approach using a **Convolutional Neural Netwo
 
 The following tools and technologies are used in this project:
 
-- **Dataset** : https://data.mendeley.com/datasets/zwr4ntf94j/1
+- **Dataset : https://data.mendeley.com/datasets/zwr4ntf94j/1**
 - **Python 3.6 or above**
 - **Google Colab / Jupyter Notebook**
 - **TensorFlow & Keras**
