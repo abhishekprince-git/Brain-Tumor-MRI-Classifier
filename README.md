@@ -12,8 +12,6 @@ A brain tumor is caused by the abnormal and uncontrolled growth of cells within 
 
 Traditionally, the diagnosis of brain tumors relies on manual visual inspection of MRI images by radiologists, or on a stereotactic biopsy in which a neurosurgeon drills into the skull to collect tissue for histological grading. While biopsy is considered the gold standard, it carries significant risks such as bleeding, infection, seizures, stroke, and in rare cases even death, and it is still not 100% accurate.
 
-Because of these risks, non-invasive imaging techniques such as MRI have become the preferred approach for diagnosing brain tumors. However, manual interpretation of MRI scans is time-consuming, tedious, and prone to human error, especially given the unstructured shape, variable size, and unpredictable location of tumors.
-
 This project proposes an automated approach using a **Convolutional Neural Network (CNN)** to classify MRI images as normal or abnormal (tumorous). The use of **transfer learning** with pre-trained architectures such as **VGG16** and **ResNet50** is also explored to improve classification accuracy and reduce training time, ultimately aiming to save radiologist time, reduce diagnostic error, and support timely treatment planning.
 
 ---
@@ -55,21 +53,13 @@ This project demonstrates a fully functional brain tumor detection system that c
 
 The major challenges in brain tumor detection from MRI data include:
 
-### Data Requirements
+- **Data Requirements** : CNN models require large amounts of labeled training data, which can be difficult to obtain in medical imaging due to privacy concerns and the need for expert annotation.
 
-CNN models require large amounts of labeled training data, which can be difficult to obtain in medical imaging due to privacy concerns and the need for expert annotation.
+- **Class Imbalance** : Medical datasets often have imbalanced classes (more normal scans than tumor scans), which can bias the model and affect detection accuracy.
 
-### Class Imbalance
+- **Image Variability** : MRI images vary in quality, resolution, and acquisition parameters across different hospitals and equipment, requiring preprocessing and normalization techniques.
 
-Medical datasets often have imbalanced classes (more normal scans than tumor scans), which can bias the model and affect detection accuracy.
-
-### Image Variability
-
-MRI images vary in quality, resolution, and acquisition parameters across different hospitals and equipment, requiring preprocessing and normalization techniques.
-
-### Overfitting
-
-Deep learning models are prone to overfitting, especially with limited medical datasets, necessitating techniques like data augmentation, regularization, and cross-validation.
+- **Overfitting** : Deep learning models are prone to overfitting, especially with limited medical datasets, necessitating techniques like data augmentation, regularization, and cross-validation.
 
 ---
 
