@@ -70,3 +70,11 @@ MRI images vary in quality, resolution, and acquisition parameters across differ
 ### Overfitting
 
 Deep learning models are prone to overfitting, especially with limited medical datasets, necessitating techniques like data augmentation, regularization, and cross-validation.
+
+---
+
+## 6. Conclusion
+
+This project demonstrates the use of CNN and transfer learning techniques for automated brain tumor classification from MRI images. The developed system provides fast and accurate tumor/non-tumor classification and can serve as a supportive tool for medical screening and analysis.
+
+> **Note:** This project is intended for research and educational purposes and is not a substitute for professional medical diagnosis.
