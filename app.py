@@ -15,11 +15,12 @@ st.set_page_config(
 # -----------------------------
 # Load Model
 # -----------------------------
-MODEL_PATH = "efficientnetb0_final.keras"
+
+MODEL_PATH = "models/efficientnetb0_final.keras"
 
 @st.cache_resource
 def load_model():
-    return tf.keras.models.load_model(MODEL_PATH)
+    return tf.keras.models.load_model(MODEL_PATH, compile=False)
 
 model = load_model()
 
