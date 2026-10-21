@@ -153,7 +153,7 @@ if uploaded_file is not None:
     is_sample_scan = False
 else:
     # --- 4. CLICKABLE SAMPLE GRID ---
-    st.markdown("### Select a sample scan to test (Click an image):")
+    st.markdown("### Select a sample scan to test :")
     col1, col2, col3, col4 = st.columns(4)
     
     samples = [
