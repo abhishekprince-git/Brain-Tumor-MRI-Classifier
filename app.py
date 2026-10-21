@@ -162,11 +162,6 @@ st.write(
     "to obtain a binary tumour classification."
 )
 
-selected_model = st.selectbox(
-    "Select Model",
-    list(MODEL_OPTIONS.keys())
-)
-
 uploaded_file = st.file_uploader(
     "Upload MRI Image",
     type=["jpg", "jpeg", "png"]
