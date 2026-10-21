@@ -178,7 +178,8 @@ if uploaded_file is not None:
             st.stop()
         # ----------------------------------
 
-        st.image(image, caption="Uploaded MRI", use_container_width=200)
+       with col2:
+            st.image(image, caption="Uploaded MRI", width=150)
 
         if st.button("🔍 Run Consensus Prediction", type="primary"):
             with st.spinner("Running analysis across 3 models..."):
