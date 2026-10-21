@@ -18,16 +18,21 @@ st.set_page_config(
 # -----------------------------
 # Skull Boundary Check
 # -----------------------------
-def is_valid_brain_mri(pil_image, min_area_ratio=0.05, max_area_ratio=0.85, min_circularity=0.3):
+def is_valid_brain_mri(pil_image, min_area_ratio=0.10, max_area_ratio=0.95, min_circularity=0.15):
     """
-    Performs a basic skull/brain boundary check to filter out non-MRI images.
-    Returns True if the image looks like a valid axial brain MRI, False otherwise.
+    Performs a basic skull/brain boundary check.
+    Relaxed thresholds to accommodate various MRI styles.
     """
     img_array = np.array(pil_image.convert("L"))
     h, w = img_array.shape
     total_area = h * w
     
-    blurred = cv2.GaussianBlur(img_array, (5, 5), 0)
+    # Crop center 90% to ignore borders/text that might confuse contour detection
+    margin_h, margin_w = int(h * 0.05), int(w * 0.05)
+    cropped = img_array[margin_h:h-margin_h, margin_w:w-margin_w]
+    cropped_area = cropped.shape[0] * cropped.shape[1]
+    
+    blurred = cv2.GaussianBlur(cropped, (5, 5), 0)
     _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -37,7 +42,7 @@ def is_valid_brain_mri(pil_image, min_area_ratio=0.05, max_area_ratio=0.85, min_
         
     largest_contour = max(contours, key=cv2.contourArea)
     area = cv2.contourArea(largest_contour)
-    area_ratio = area / total_area
+    area_ratio = area / cropped_area
     
     if area_ratio > 0.90:
         _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
@@ -46,7 +51,7 @@ def is_valid_brain_mri(pil_image, min_area_ratio=0.05, max_area_ratio=0.85, min_
             return False
         largest_contour = max(contours, key=cv2.contourArea)
         area = cv2.contourArea(largest_contour)
-        area_ratio = area / total_area
+        area_ratio = area / cropped_area
 
     if not (min_area_ratio < area_ratio < max_area_ratio):
         return False
@@ -57,10 +62,7 @@ def is_valid_brain_mri(pil_image, min_area_ratio=0.05, max_area_ratio=0.85, min_
         
     circularity = 4 * np.pi * area / (perimeter * perimeter)
     
-    if circularity < min_circularity:
-        return False
-        
-    return True
+    return circularity >= min_circularity
 
 # -----------------------------
 # Model Loading Functions
@@ -124,38 +126,34 @@ def predict_mri(image, model):
     )
 
     return prediction, class_probability * 100, tumour_probability
-    
+
 # -----------------------------
 # User Interface
 # -----------------------------
 st.title("🧠 Brain Tumor MRI Classifier")
 st.write(
-    "Upload a brain MRI image or select a sample scan below to obtain a binary tumour classification "
-    "using our 3-model consensus engine."
+    "Upload a brain MRI image or select a sample scan below. "
+    "The 3-model consensus engine will predict the result instantly."
 )
 
 # --- 1. FILE UPLOADER ---
-uploaded_file = st.file_uploader(
-    "Upload MRI Image",
-    type=["jpg", "jpeg", "png"]
-)
+uploaded_file = st.file_uploader("Upload MRI Image", type=["jpg", "jpeg", "png"])
 
-# --- 2. SESSION STATE FOR SAMPLE SELECTION ---
+# --- 2. SESSION STATE ---
 if 'selected_sample' not in st.session_state:
     st.session_state['selected_sample'] = None
 
-# --- 3. DETERMINE IMAGE TO PROCESS ---
+# --- 3. DETERMINE IMAGE SOURCE ---
 image_to_process = None
 is_sample_scan = False
 
 if uploaded_file is not None:
-    # Priority 1: User uploaded a file
     image_to_process = Image.open(uploaded_file).convert("RGB")
-    st.session_state['selected_sample'] = None # Clear sample selection if they upload
+    st.session_state['selected_sample'] = None # Clear sample if user uploads
     is_sample_scan = False
 else:
-    # Priority 2: Show 4 clickable sample images
-    st.markdown("### 🖼️ Or select a sample scan to test:")
+    # --- 4. CLICKABLE SAMPLE GRID ---
+    st.markdown("### Select a sample scan to test (Click an image):")
     col1, col2, col3, col4 = st.columns(4)
     
     samples = [
@@ -167,89 +165,92 @@ else:
     
     for col, (path, name) in zip([col1, col2, col3, col4], samples):
         with col:
-            st.image(path, use_container_width=True)
-            if st.button(f"Select", key=f"btn_{name}", use_container_width=True):
+            # Highlight logic: If this is the selected sample, show a green caption
+            is_selected = (st.session_state['selected_sample'] == path)
+            caption = "✅ Selected" if is_selected else name
+            
+            st.image(path, caption=caption, use_container_width=True)
+            
+            # The button acts as the clickable area for the image
+            # We use a small key based on the path to ensure uniqueness
+            btn_key = f"select_{path}"
+            if st.button("Select this scan", key=btn_key, use_container_width=True, type="primary" if is_selected else "secondary"):
                 st.session_state['selected_sample'] = path
-                st.rerun() # Instantly refreshes the app with the new selection
+                st.rerun() # Instantly refresh to show selection and predict
 
-    # If a sample was previously selected, load it
+    # Load the selected sample for processing
     if st.session_state['selected_sample']:
         try:
             image_to_process = Image.open(st.session_state['selected_sample']).convert("RGB")
             is_sample_scan = True
-            # Extract just the filename for the UI message
-            filename = st.session_state['selected_sample'].split('/')[-1] 
-            st.info(f"🖼️ Running prediction on **{filename}**")
         except FileNotFoundError:
-            st.error("Selected sample image not found in assets folder.")
+            st.error("Selected sample image not found.")
             st.stop()
     else:
-        # If neither uploaded nor selected, stop here and wait for user action
-        st.stop()
+        st.stop() # Wait for user to upload or select
 
-# --- 4. MAIN PREDICTION FLOW ---
+# --- 5. MAIN PREDICTION FLOW (Runs automatically after selection) ---
 if image_to_process is not None:
     
-    # 1. INVALID SCAN CHECK (From Step 1)
+    # 1. INVALID SCAN CHECK
     if not is_valid_brain_mri(image_to_process):
         st.error("⚠️ **Invalid Scan Detected**")
-        st.warning("The uploaded image does not appear to be a valid axial brain MRI scan. Please upload a proper brain MRI image.")
+        st.warning("The image does not appear to be a valid axial brain MRI scan. Please upload a proper brain MRI image.")
         st.stop()
 
-    # 2. DISPLAY IMAGE
+    # 2. DISPLAY IMAGE (Larger view of the selected/uploaded image)
+    st.markdown("---")
     st.image(
         image_to_process,
-        caption="Sample MRI" if is_sample_scan else "Uploaded MRI",
+        caption="Analyzing: Sample Scan" if is_sample_scan else "Analyzing: Uploaded MRI",
         use_container_width=True
     )
 
-    # 3. CONSENSUS PREDICTION (From Step 2)
-    if st.button("🔍 Run Consensus Prediction", type="primary"):
-        with st.spinner("Running analysis across 3 models..."):
-            models = load_all_models()
-            
-            if len(models) < 3:
-                st.error("Not all models could be loaded. Please check your model files.")
-                st.stop()
+    # 3. CONSENSUS PREDICTION (Auto-runs)
+    with st.spinner("🧠 Running analysis across 3 models..."):
+        models = load_all_models()
+        
+        if len(models) < 3:
+            st.error("Not all models could be loaded. Please check your model files.")
+            st.stop()
 
-            results = []
-            tumour_votes = 0
+        results = []
+        tumour_votes = 0
 
-            for model_name, model in models.items():
-                pred, conf, prob = predict_mri(image_to_process, model)
-                results.append({
-                    "model": model_name,
-                    "prediction": pred,
-                    "confidence": conf,
-                    "probability": prob
-                })
-                if pred == "Tumour":
-                    tumour_votes += 1
+        for model_name, model in models.items():
+            pred, conf, prob = predict_mri(image_to_process, model)
+            results.append({
+                "model": model_name,
+                "prediction": pred,
+                "confidence": conf,
+                "probability": prob
+            })
+            if pred == "Tumour":
+                tumour_votes += 1
 
-            non_tumour_votes = 3 - tumour_votes
+        non_tumour_votes = 3 - tumour_votes
 
-        # --- DISPLAY RESULTS ---
-        st.markdown("---")
-        st.subheader("🧠 Final Consensus Prediction")
+    # --- DISPLAY RESULTS ---
+    st.subheader(" Final Consensus Prediction")
 
-        if tumour_votes >= 2:
-            consensus_class = "Tumourous"
-            agreement = tumour_votes
-        else:
-            consensus_class = "Non-Tumourous"
-            agreement = non_tumour_votes
+    if tumour_votes >= 2:
+        consensus_class = "Tumourous"
+        agreement = tumour_votes
+    else:
+        consensus_class = "Non-Tumourous"
+        agreement = non_tumour_votes
 
-        confidence_level = "High Confidence" if agreement == 3 else "Moderate Confidence"
+    confidence_level = "High Confidence" if agreement == 3 else "Moderate Confidence"
 
-        st.markdown(f"### {consensus_class} ({confidence_level})")
-        st.info(f"**Consensus:** {agreement}/3 models agree this is a **{consensus_class.lower()}** scan ({confidence_level}).")
+    st.markdown(f"### {consensus_class} ({confidence_level})")
+    st.info(f"**Consensus:** {agreement}/3 models agree this is a **{consensus_class.lower()}** scan ({confidence_level}).")
 
-        st.subheader("📊 Individual Model Breakdown")
-        for res in results:
-            icon = "🧠" if res["prediction"] == "Tumour" else "✅"
-            st.write(f"- **{res['model']}**: {icon} {res['prediction']} ({res['confidence']:.2f}% probability)")
+    st.subheader("📊 Individual Model Breakdown")
+    for res in results:
+        icon = "🧠" if res["prediction"] == "Tumour" else "✅"
+        st.write(f"- **{res['model']}**: {icon} {res['prediction']} ({res['confidence']:.2f}% probability)")
 
-        st.caption(
-            "⚠️ This is an experimental AI classification, not a medical diagnosis. "
-            "A qualified radiologist must interpret MRI scans for clinical decisions."
-        )
+    st.caption(
+        "⚠️ This is an experimental AI classification, not a medical diagnosis. "
+        "A qualified radiologist must interpret MRI scans for clinical decisions."
+    )
