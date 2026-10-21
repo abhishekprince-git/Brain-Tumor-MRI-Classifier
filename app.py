@@ -124,51 +124,73 @@ def predict_mri(image, model):
     )
 
     return prediction, class_probability * 100, tumour_probability
-
+    
 # -----------------------------
 # User Interface
 # -----------------------------
 st.title("🧠 Brain Tumor MRI Classifier")
 st.write(
-    "Upload a brain MRI image or try a sample scan to obtain a binary tumour classification "
+    "Upload a brain MRI image or select a sample scan below to obtain a binary tumour classification "
     "using our 3-model consensus engine."
 )
 
-# --- NEW: LAYOUT FOR UPLOAD & SAMPLE BUTTON ---
-col1, col2 = st.columns([3, 1])
-with col1:
-    uploaded_file = st.file_uploader(
-        "Upload MRI Image",
-        type=["jpg", "jpeg", "png"]
-    )
-with col2:
-    # This button triggers the sample scan mode
-    sample_mode = st.button(
-        "🖼️ Try Sample Scan", 
-        use_container_width=True,
-        help="Click to test the app with a pre-loaded MRI scan."
-    )
-# ----------------------------------------------
+# --- 1. FILE UPLOADER ---
+uploaded_file = st.file_uploader(
+    "Upload MRI Image",
+    type=["jpg", "jpeg", "png"]
+)
 
-# Determine which image to process
+# --- 2. SESSION STATE FOR SAMPLE SELECTION ---
+if 'selected_sample' not in st.session_state:
+    st.session_state['selected_sample'] = None
+
+# --- 3. DETERMINE IMAGE TO PROCESS ---
 image_to_process = None
 is_sample_scan = False
 
 if uploaded_file is not None:
+    # Priority 1: User uploaded a file
     image_to_process = Image.open(uploaded_file).convert("RGB")
-elif sample_mode:
-    try:
-        # Load the sample image from the assets folder
-        image_to_process = Image.open("assets/sample_mri.jpg").convert("RGB")
-        is_sample_scan = True
-        st.info("🖼️ Running prediction on the **Sample Scan**.")
-    except FileNotFoundError:
-        st.error("❌ Sample image not found. Please ensure 'assets/sample_mri.jpg' exists.")
+    st.session_state['selected_sample'] = None # Clear sample selection if they upload
+    is_sample_scan = False
+else:
+    # Priority 2: Show 4 clickable sample images
+    st.markdown("### 🖼️ Or select a sample scan to test:")
+    col1, col2, col3, col4 = st.columns(4)
+    
+    samples = [
+        ("assets/sample_1.jpg", "Sample 1"),
+        ("assets/sample_2.jpg", "Sample 2"),
+        ("assets/sample_3.jpg", "Sample 3"),
+        ("assets/sample_4.jpg", "Sample 4")
+    ]
+    
+    for col, (path, name) in zip([col1, col2, col3, col4], samples):
+        with col:
+            st.image(path, use_container_width=True)
+            if st.button(f"Select", key=f"btn_{name}", use_container_width=True):
+                st.session_state['selected_sample'] = path
+                st.rerun() # Instantly refreshes the app with the new selection
 
-# --- MAIN PREDICTION FLOW ---
+    # If a sample was previously selected, load it
+    if st.session_state['selected_sample']:
+        try:
+            image_to_process = Image.open(st.session_state['selected_sample']).convert("RGB")
+            is_sample_scan = True
+            # Extract just the filename for the UI message
+            filename = st.session_state['selected_sample'].split('/')[-1] 
+            st.info(f"🖼️ Running prediction on **{filename}**")
+        except FileNotFoundError:
+            st.error("Selected sample image not found in assets folder.")
+            st.stop()
+    else:
+        # If neither uploaded nor selected, stop here and wait for user action
+        st.stop()
+
+# --- 4. MAIN PREDICTION FLOW ---
 if image_to_process is not None:
     
-    # 1. INVALID SCAN CHECK
+    # 1. INVALID SCAN CHECK (From Step 1)
     if not is_valid_brain_mri(image_to_process):
         st.error("⚠️ **Invalid Scan Detected**")
         st.warning("The uploaded image does not appear to be a valid axial brain MRI scan. Please upload a proper brain MRI image.")
