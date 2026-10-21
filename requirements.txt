@@ -1,5 +1,8 @@
 streamlit
-tensorflow==2.21.0 
+tensorflow==2.15.0
 numpy==1.26.4
 pillow
 huggingface_hub
+opencv-python-headless
+matplotlib
+scipy
