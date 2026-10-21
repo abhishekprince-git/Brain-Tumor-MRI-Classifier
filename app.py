@@ -75,25 +75,35 @@ st.set_page_config(
 )
 
 # -----------------------------
-# Model Configuration
+# Load All Models for Consensus
 # -----------------------------
 REPO_ID = "abhishek2prince/brain-tumor-convnext"
 
-MODEL_OPTIONS = {
-    "EfficientNetB0": "efficientnet",
-    "ConvNeXt-Tiny (BCE Loss)": "convnext_tiny_bce.keras",
-    "ConvNeXt-Tiny (Focal Loss)": "convnext_tiny_focal.keras",
-}
-
-# -----------------------------
-# Load Models
-# -----------------------------
 @st.cache_resource
-def load_local_model(model_path):
-    return tf.keras.models.load_model(
-        model_path,
-        compile=False
-    )
+def load_all_models():
+    models = {}
+    
+    # 1. EfficientNetB0 (Local)
+    try:
+        models["EfficientNetB0"] = tf.keras.models.load_model(
+            "models/efficientnetb0_final.keras", compile=False
+        )
+    except Exception as e:
+        st.error(f"Failed to load EfficientNetB0: {e}")
+
+    # 2. ConvNeXt-Tiny (BCE Loss)
+    try:
+        models["ConvNeXt-BCE"] = load_huggingface_model("convnext_tiny_bce.keras")
+    except Exception as e:
+        st.error(f"Failed to load ConvNeXt-BCE: {e}")
+
+    # 3. ConvNeXt-Tiny (Focal Loss)
+    try:
+        models["ConvNeXt-Focal"] = load_huggingface_model("convnext_tiny_focal.keras")
+    except Exception as e:
+        st.error(f"Failed to load ConvNeXt-Focal: {e}")
+
+    return models
 
 @st.cache_resource
 def load_huggingface_model(filename):
