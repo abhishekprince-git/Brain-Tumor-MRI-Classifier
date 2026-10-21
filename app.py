@@ -176,59 +176,77 @@ if uploaded_file is not None:
     try:
         image = Image.open(uploaded_file).convert("RGB")
 
-        # --- INVALID SCAN CHECK ---
+        # --- STEP 1: INVALID SCAN CHECK ---
         if not is_valid_brain_mri(image):
             st.error("⚠️ **Invalid Scan Detected**")
             st.warning("The uploaded image does not appear to be a valid axial brain MRI scan. Please upload a proper brain MRI image.")
-            st.stop()  # Halts further execution
-        # --------------------------------
+            st.stop()
+        # ----------------------------------
 
-        st.image(
-            image,
-            caption="Uploaded MRI",
-            use_container_width=True
-        )
+        st.image(image, caption="Uploaded MRI", use_container_width=True)
 
-        if st.button("🔍 Predict", type="primary"):
-            with st.spinner("Loading model and analysing image..."):
-                model_choice = MODEL_OPTIONS[selected_model]
+        if st.button("🔍 Run Consensus Prediction", type="primary"):
+            with st.spinner("Running analysis across 3 models..."):
+                models = load_all_models()
+                
+                # Ensure we have all 3 models loaded
+                if len(models) < 3:
+                    st.error("Not all models could be loaded. Please check your model files and internet connection.")
+                    st.stop()
 
-                if model_choice == "efficientnet":
-                    model = load_local_model(
-                        "models/efficientnetb0_final.keras"
-                    )
-                else:
-                    model = load_huggingface_model(model_choice)
+                results = []
+                tumour_votes = 0
 
-                prediction, confidence, tumour_probability = (
-                    predict_mri(image, model)
-                )
+                # Run prediction on all 3 models
+                for model_name, model in models.items():
+                    pred, conf, prob = predict_mri(image, model)
+                    results.append({
+                        "model": model_name,
+                        "prediction": pred,
+                        "confidence": conf,
+                        "probability": prob
+                    })
+                    if pred == "Tumour":
+                        tumour_votes += 1
 
-            st.subheader("Prediction")
+                non_tumour_votes = 3 - tumour_votes
 
-            if prediction == "Tumour":
-                st.error(f"🧠 {prediction}")
+            # --- DISPLAY CONSENSUS RESULTS ---
+            st.markdown("---")
+            st.subheader("🧠 Final Consensus Prediction")
+
+            if tumour_votes >= 2:
+                consensus_class = "Tumourous"
+                agreement = tumour_votes
+                consensus_color = "error" # Red for tumour
             else:
-                st.success(f"✅ {prediction}")
+                consensus_class = "Non-Tumourous"
+                agreement = non_tumour_votes
+                consensus_color = "success" # Green for non-tumour
 
-            st.metric(
-                "Predicted Class Probability",
-                f"{confidence:.2f}%"
-            )
+            # Determine confidence level based on agreement
+            if agreement == 3:
+                confidence_level = "High Confidence"
+            elif agreement == 2:
+                confidence_level = "Moderate Confidence"
+            else:
+                confidence_level = "Low Confidence"
+
+            # Display the exact requested message format
+            st.markdown(f"### {consensus_class} ({confidence_level})")
+            st.info(f"**Consensus:** {agreement}/3 models agree this is a **{consensus_class.lower()}** scan ({confidence_level}).")
+
+            # Display individual model breakdown for transparency
+            st.subheader("📊 Individual Model Breakdown")
+            for res in results:
+                icon = "🧠" if res["prediction"] == "Tumour" else "✅"
+                st.write(f"- **{res['model']}**: {icon} {res['prediction']} ({res['confidence']:.2f}% probability)")
 
             st.caption(
-                f"Tumour probability: {tumour_probability:.4f}"
-            )
-
-            st.info(
-                "This is an experimental AI classification, "
-                "not a medical diagnosis. A qualified radiologist "
-                "must interpret MRI scans for clinical decisions."
+                "⚠️ This is an experimental AI classification, not a medical diagnosis. "
+                "A qualified radiologist must interpret MRI scans for clinical decisions."
             )
 
     except Exception as e:
-        st.error(
-            "The model could not process this image. "
-            "Please check the model files and deployment logs."
-        )
+        st.error("The model could not process this image. Please check the model files and deployment logs.")
         st.exception(e)
