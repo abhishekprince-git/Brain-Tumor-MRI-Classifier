@@ -1,10 +1,69 @@
-
 import os
 import streamlit as st
 import tensorflow as tf
 import numpy as np
 from PIL import Image
 from huggingface_hub import hf_hub_download
+import cv2
+import numpy as np
+
+# -----------------------------
+# Skull Boundary Check
+# -----------------------------
+def is_valid_brain_mri(pil_image, min_area_ratio=0.05, max_area_ratio=0.85, min_circularity=0.3):
+    """
+    Performs a basic skull/brain boundary check to filter out non-MRI images.
+    Returns True if the image looks like a valid axial brain MRI, False otherwise.
+    """
+    # Convert PIL image to grayscale numpy array
+    img_array = np.array(pil_image.convert("L"))
+    h, w = img_array.shape
+    total_area = h * w
+    
+    # Apply Gaussian blur to reduce noise
+    blurred = cv2.GaussianBlur(img_array, (5, 5), 0)
+    
+    # Otsu's thresholding to separate foreground (brain/skull) from background
+    _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    
+    # Find external contours
+    contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    
+    if not contours:
+        return False
+        
+    # Get the largest contour
+    largest_contour = max(contours, key=cv2.contourArea)
+    area = cv2.contourArea(largest_contour)
+    area_ratio = area / total_area
+    
+    # If the largest contour is basically the whole image, the colors might be inverted.
+    # In that case, invert the threshold and try again.
+    if area_ratio > 0.90:
+        _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+        contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if not contours:
+            return False
+        largest_contour = max(contours, key=cv2.contourArea)
+        area = cv2.contourArea(largest_contour)
+        area_ratio = area / total_area
+
+    # Check if area ratio is within expected bounds for a brain scan (not too small, not the whole image)
+    if not (min_area_ratio < area_ratio < max_area_ratio):
+        return False
+        
+    # Check circularity: 4 * pi * area / (perimeter^2). A perfect circle is 1.0.
+    # Brain cross-sections are roughly elliptical, so a threshold of ~0.3-0.4 works well.
+    perimeter = cv2.arcLength(largest_contour, True)
+    if perimeter == 0:
+        return False
+        
+    circularity = 4 * np.pi * area / (perimeter * perimeter)
+    
+    if circularity < min_circularity:
+        return False
+        
+    return True
 
 # -----------------------------
 # Page Configuration
@@ -106,6 +165,13 @@ uploaded_file = st.file_uploader(
 if uploaded_file is not None:
     try:
         image = Image.open(uploaded_file).convert("RGB")
+
+        # --- INVALID SCAN CHECK ---
+        if not is_valid_brain_mri(image):
+            st.error("⚠️ **Invalid Scan Detected**")
+            st.warning("The uploaded image does not appear to be a valid axial brain MRI scan. Please upload a proper brain MRI image.")
+            st.stop()  # Halts further execution
+        # --------------------------------
 
         st.image(
             image,
