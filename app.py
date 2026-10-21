@@ -151,21 +151,20 @@ def predict_mri(image, model):
     )
 
     return prediction, class_probability * 100, tumour_probability
-
 # -----------------------------
 # User Interface
 # -----------------------------
 st.title("🧠 Brain Tumor MRI Classifier")
+st.write("Upload a brain MRI image to obtain a consensus tumour classification.")
 
-st.write(
-    "Upload a brain MRI image and select a trained model "
-    "to obtain a binary tumour classification."
-)
+# Create columns to center the uploader (ratio 1:2:1 pushes content to the middle)
+col1, col2, col3 = st.columns([1, 2, 1])
 
-uploaded_file = st.file_uploader(
-    "Upload MRI Image",
-    type=["jpg", "jpeg", "png"]
-)
+with col2:
+    uploaded_file = st.file_uploader(
+        "Upload MRI Image",
+        type=["jpg", "jpeg", "png"]
+    )
 
 if uploaded_file is not None:
     try:
@@ -178,70 +177,73 @@ if uploaded_file is not None:
             st.stop()
         # ----------------------------------
 
-       with col2:
+        # Display image centered and slightly smaller (width=350 pixels)
+        with col2:
             st.image(image, caption="Uploaded MRI", width=150)
 
-        if st.button("🔍 Run Consensus Prediction", type="primary"):
-            with st.spinner("Running analysis across 3 models..."):
-                models = load_all_models()
+        # Center the predict button as well
+        with col2:
+            if st.button("🔍 Run Consensus Prediction", type="primary", use_container_width=True):
+                with st.spinner("Running analysis across 3 models..."):
+                    models = load_all_models()
+                    
+                    if len(models) < 3:
+                        st.error("Not all models could be loaded. Please check your model files and internet connection.")
+                        st.stop()
+
+                    results = []
+                    tumour_votes = 0
+
+                    # Run prediction on all 3 models
+                    for model_name, model in models.items():
+                        pred, conf, prob = predict_mri(image, model)
+                        results.append({
+                            "model": model_name,
+                            "prediction": pred,
+                            "confidence": conf,
+                            "probability": prob
+                        })
+                        if pred == "Tumour":
+                            tumour_votes += 1
+
+                    non_tumour_votes = 3 - tumour_votes
+
+                # --- DISPLAY CONSENSUS RESULTS ---
+                st.markdown("---")
                 
-                # Ensure we have all 3 models loaded
-                if len(models) < 3:
-                    st.error("Not all models could be loaded. Please check your model files and internet connection.")
-                    st.stop()
+                # Center the consensus header
+                st.markdown("<div style='text-align: center;'><h3>🧠 Final Consensus Prediction</h3></div>", unsafe_allow_html=True)
 
-                results = []
-                tumour_votes = 0
+                if tumour_votes >= 2:
+                    consensus_class = "Tumourous"
+                    agreement = tumour_votes
+                else:
+                    consensus_class = "Non-Tumourous"
+                    agreement = non_tumour_votes
 
-                # Run prediction on all 3 models
-                for model_name, model in models.items():
-                    pred, conf, prob = predict_mri(image, model)
-                    results.append({
-                        "model": model_name,
-                        "prediction": pred,
-                        "confidence": conf,
-                        "probability": prob
-                    })
-                    if pred == "Tumour":
-                        tumour_votes += 1
+                # Determine confidence level based on agreement
+                confidence_level = "High Confidence" if agreement == 3 else "Moderate Confidence"
 
-                non_tumour_votes = 3 - tumour_votes
+                # Display the exact requested message format, centered
+                st.markdown(
+                    f"<div style='text-align: center;'>"
+                    f"<h3>{consensus_class} ({confidence_level})</h3>"
+                    f"<p style='font-size: 1.1em;'><strong>Consensus:</strong> {agreement}/3 models agree this is a <strong>{consensus_class.lower()}</strong> scan ({confidence_level}).</p>"
+                    f"</div>", 
+                    unsafe_allow_html=True
+                )
 
-            # --- DISPLAY CONSENSUS RESULTS ---
-            st.markdown("---")
-            st.subheader("🧠 Final Consensus Prediction")
+                # Display individual model breakdown for transparency
+                st.subheader("📊 Individual Model Breakdown")
+                for res in results:
+                    icon = "🧠" if res["prediction"] == "Tumour" else "✅"
+                    st.write(f"- **{res['model']}**: {icon} {res['prediction']} ({res['confidence']:.2f}% probability)")
 
-            if tumour_votes >= 2:
-                consensus_class = "Tumourous"
-                agreement = tumour_votes
-                consensus_color = "error" # Red for tumour
-            else:
-                consensus_class = "Non-Tumourous"
-                agreement = non_tumour_votes
-                consensus_color = "success" # Green for non-tumour
-
-            # Determine confidence level based on agreement
-            if agreement == 3:
-                confidence_level = "High Confidence"
-            elif agreement == 2:
-                confidence_level = "Moderate Confidence"
-            else:
-                confidence_level = "Low Confidence"
-
-            # Display the exact requested message format
-            st.markdown(f"### {consensus_class} ({confidence_level})")
-            st.info(f"**Consensus:** {agreement}/3 models agree this is a **{consensus_class.lower()}** scan ({confidence_level}).")
-
-            # Display individual model breakdown for transparency
-            st.subheader("📊 Individual Model Breakdown")
-            for res in results:
-                icon = "🧠" if res["prediction"] == "Tumour" else "✅"
-                st.write(f"- **{res['model']}**: {icon} {res['prediction']} ({res['confidence']:.2f}% probability)")
-
-            st.caption(
-                "⚠️ This is an experimental AI classification, not a medical diagnosis. "
-                "A qualified radiologist must interpret MRI scans for clinical decisions."
-            )
+                st.markdown("---")
+                st.caption(
+                    "⚠️ This is an experimental AI classification, not a medical diagnosis. "
+                    "A qualified radiologist must interpret MRI scans for clinical decisions."
+                )
 
     except Exception as e:
         st.error("The model could not process this image. Please check the model files and deployment logs.")
