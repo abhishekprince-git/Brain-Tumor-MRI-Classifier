@@ -2,7 +2,7 @@ import os
 import streamlit as st
 import tensorflow as tf
 import numpy as np
-from PIL import Image, UnidentifiedImageError 
+from PIL import Image
 import cv2
 from matplotlib import cm
 from huggingface_hub import hf_hub_download
@@ -24,17 +24,14 @@ def is_valid_brain_mri(pil_image):
     Robust check for valid brain MRI.
     Handles edge cases: white borders, inverted colors, solid shapes, and complex photos.
     """
-    # Resize to a standard size for consistent math (faster and more stable)
     img_resized = pil_image.resize((512, 512))
     img_array = np.array(img_resized.convert("L"))
     h, w = img_array.shape
     total_area = h * w
     
-    # EDGE CASE 1: Solid Color Check (e.g., a solid red circle)
     if np.std(img_array) < 15:
         return False
 
-    # Thresholding
     blurred = cv2.GaussianBlur(img_array, (5, 5), 0)
     _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     
@@ -46,8 +43,6 @@ def is_valid_brain_mri(pil_image):
     area = cv2.contourArea(largest_contour)
     area_ratio = area / total_area
     
-    # EDGE CASE 2: Inverted Colors / White Backgrounds
-    # If the largest contour is basically the whole image, the colors might be inverted.
     if area_ratio > 0.90:
         _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -57,31 +52,70 @@ def is_valid_brain_mri(pil_image):
         area = cv2.contourArea(largest_contour)
         area_ratio = area / total_area
 
-    # Check if area ratio is within expected bounds for a brain scan
     if not (0.10 < area_ratio < 0.75):
         return False
         
-    # Check circularity
     perimeter = cv2.arcLength(largest_contour, True)
     if perimeter == 0:
         return False
     circularity = 4 * np.pi * area / (perimeter * perimeter)
     
-    # A brain is an oval (0.4 to 0.95). Rejects perfect circles (1.0) and complex shapes like people (<0.4)
     if not (0.4 <= circularity <= 0.95):
         return False
 
-    # EDGE CASE 3: Texture Check (Standard Deviation inside the brain)
     mask = np.zeros(img_array.shape, dtype=np.uint8)
     cv2.drawContours(mask, [largest_contour], -1, 255, -1)
     mean, std_dev = cv2.meanStdDev(img_array, mask=mask)
     
-    # Brain tissue has folds (high texture). A solid logo or smooth shape will have low std_dev.
     if std_dev[0] < 20:
         return False
 
     return True
+
+# -----------------------------
+# Grad-CAM Functions (Explainable AI)
+# -----------------------------
+def get_last_conv_layer_name(model):
+    """Dynamically finds the last convolutional layer in the model."""
+    for layer in reversed(model.layers):
+        if len(layer.output_shape) == 4:  # Conv2D layers have 4D output
+            return layer.name
+    return None
+
+def get_gradcam_heatmap(img_array, model, last_conv_layer_name, pred_index=None):
+    """Generates the Grad-CAM heatmap for the given image and model."""
+    grad_model = tf.keras.models.Model(
+        [model.inputs], [model.get_layer(last_conv_layer_name).output, model.output]
+    )
+
+    with tf.GradientTape() as tape:
+        last_conv_layer_output, preds = grad_model(img_array)
+        if pred_index is None:
+            pred_index = tf.argmax(preds[0])
+        class_channel = preds[:, pred_index]
+
+    grads = tape.gradient(class_channel, last_conv_layer_output)
+    pooled_grads = tf.reduce_mean(grads, axis=(0, 1, 2))
+
+    last_conv_layer_output = last_conv_layer_output[0]
+    heatmap = last_conv_layer_output @ pooled_grads[..., tf.newaxis]
+    heatmap = tf.squeeze(heatmap)
+
+    heatmap = tf.maximum(heatmap, 0) / tf.math.reduce_max(heatmap)
+    return heatmap.numpy()
+
+def create_superimposed_image(original_image, heatmap, alpha=0.4):
+    """Overlays the heatmap onto the original image."""
+    heatmap_resized = cv2.resize(heatmap, (original_image.width, original_image.height))
+    heatmap_uint8 = np.uint8(255 * heatmap_resized)
+    heatmap_colored = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
     
+    img_array = np.array(original_image.convert("RGB"))
+    superimposed_img = heatmap_colored * alpha + img_array
+    superimposed_img = np.clip(superimposed_img, 0, 255).astype(np.uint8)
+    
+    return superimposed_img
+
 # -----------------------------
 # Model Loading Functions
 # -----------------------------
@@ -100,7 +134,6 @@ def load_huggingface_model(filename):
 def load_all_models():
     models = {}
     
-    # 1. EfficientNetB0 (Local)
     try:
         models["EfficientNetB0"] = tf.keras.models.load_model(
             "models/efficientnetb0_final.keras", compile=False
@@ -108,13 +141,11 @@ def load_all_models():
     except Exception as e:
         st.error(f"Failed to load EfficientNetB0: {e}")
 
-    # 2. ConvNeXt-Tiny (BCE Loss)
     try:
         models["ConvNeXt-BCE"] = load_huggingface_model("convnext_tiny_bce.keras")
     except Exception as e:
         st.error(f"Failed to load ConvNeXt-BCE: {e}")
 
-    # 3. ConvNeXt-Tiny (Focal Loss)
     try:
         models["ConvNeXt-Focal"] = load_huggingface_model("convnext_tiny_focal.keras")
     except Exception as e:
@@ -148,10 +179,10 @@ def predict_mri(image, model):
 # -----------------------------
 # User Interface
 # -----------------------------
-st.title("🧠 Brain Tumor MRI Classifier")
+st.title("Brain Tumor MRI Classifier")
 st.write(
     "Upload a brain MRI image or select a sample scan below. "
-    "The 3-model consensus engine will predict the result instantly."
+    "The 3-model consensus engine will predict the result and generate an explainability heatmap."
 )
 
 # --- 1. FILE UPLOADER ---
@@ -170,7 +201,7 @@ if uploaded_file is not None:
     st.session_state['selected_sample'] = None 
     is_sample_scan = False
 else:
-    st.markdown("### Select a sample scan to test (Click an image):")
+    st.markdown("### Select a sample scan to test:")
     col1, col2, col3, col4 = st.columns(4)
     
     samples = [
@@ -187,7 +218,8 @@ else:
             st.image(path, caption=caption, use_container_width=True)
             
             btn_key = f"select_{path}"
-            if st.button("Select this scan", key=btn_key, use_container_width=True, type="primary" if is_selected else "secondary"):
+            button_type = "primary" if is_selected else "secondary"
+            if st.button("Select this scan", key=btn_key, use_container_width=True, type=button_type):
                 st.session_state['selected_sample'] = path
                 st.rerun()
 
@@ -205,13 +237,13 @@ else:
 if image_to_process is not None:
     
     if not is_valid_brain_mri(image_to_process):
-        st.error("**Invalid Scan Detected**")
+        st.error("Invalid Scan Detected")
         st.warning("The image does not appear to be a valid axial brain MRI scan. Please upload a proper brain MRI image.")
         st.stop()
 
     st.markdown("---")
     
-    with st.spinner(" Running analysis across 3 models..."):
+    with st.spinner("Running analysis across 3 models..."):
         models = load_all_models()
         
         if len(models) < 3:
@@ -245,36 +277,40 @@ if image_to_process is not None:
     confidence_level = "High Confidence" if agreement == 3 else "Moderate Confidence"
 
     st.markdown(f"### {consensus_class} ({confidence_level})")
-    st.info(f"**Consensus:** {agreement}/3 models agree this is a **{consensus_class.lower()}** scan ({confidence_level}).")
+    st.info(f"**Consensus:** {agreement}/3 models agree this is a {consensus_class.lower()} scan ({confidence_level}).")
 
     st.subheader("Individual Model Breakdown")
     for res in results:
         st.write(f"- **{res['model']}**: {res['prediction']} ({res['confidence']:.2f}% probability)")
         
+    # --- 5. GRAD-CAM HEATMAP GENERATION ---
+    st.markdown("---")
+    st.subheader("Explainable AI: Tumor Localization (Grad-CAM)")
+    st.write("The heatmap highlights the regions of the MRI that most strongly influenced the EfficientNetB0 model's prediction.")
+    
     try:
         eff_model = models["EfficientNetB0"]
         last_conv_name = get_last_conv_layer_name(eff_model)
         
         if last_conv_name:
-            # Prepare image array for the model (same as predict_mri)
             img_resized = image_to_process.resize((224, 224))
             img_array = np.expand_dims(np.asarray(img_resized, dtype=np.float32), axis=0)
             
             heatmap = get_gradcam_heatmap(img_array, eff_model, last_conv_name)
             superimposed_img = create_superimposed_image(image_to_process, heatmap)
             
-            # Display side-by-side
             col_orig, col_heat = st.columns(2)
             with col_orig:
                 st.image(image_to_process, caption="Original MRI", use_container_width=True)
             with col_heat:
-                st.image(superimposed_img, caption="Grad-CAM Heatmap (EfficientNetB0)", use_container_width=True)
+                st.image(superimposed_img, caption="Grad-CAM Heatmap Overlay", use_container_width=True)
         else:
             st.warning("Could not find a convolutional layer for Grad-CAM.")
     except Exception as e:
         st.warning(f"Could not generate heatmap: {e}")
 
+st.markdown("---")
 st.caption(
-    "⚠️ This is an experimental AI classification, not a medical diagnosis. "
-    "A qualified radiologist must interpret MRI scans for clinical decisions."
+    "Disclaimer: This is an experimental AI classification tool and not a medical diagnosis. "
+    "A qualified radiologist must interpret MRI scans for all clinical decisions."
 )
