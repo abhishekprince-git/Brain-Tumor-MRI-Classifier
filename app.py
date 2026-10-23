@@ -11,7 +11,7 @@ from huggingface_hub import hf_hub_download
 # -----------------------------
 st.set_page_config(
     page_title="Brain Tumor MRI Classifier",
-    page_icon="🧠",
+    page_icon="",
     layout="centered"
 )
 
@@ -70,26 +70,62 @@ def is_valid_brain_mri(pil_image):
 # -----------------------------
 # Grad-CAM Functions
 # -----------------------------
-# Verified layer names from the GradCAM notebook (07_GradCAM.ipynb)
-GRADCAM_LAYER_MAP = {
-    "EfficientNetB0": "top_conv",
-    "ConvNeXt-BCE": "convnext_tiny_stage_3_block_2_depthwise_conv",
-    "ConvNeXt-Focal": "convnext_tiny_stage_3_block_2_depthwise_conv",
-}
+def find_layer_recursive(model, layer_name):
+    """
+    Recursively searches for a layer by name, including inside nested models.
+    This handles architectures where base models are wrapped (like ConvNeXt).
+    """
+    # Try direct access first
+    try:
+        return model.get_layer(layer_name)
+    except ValueError:
+        pass
+    
+    # Search recursively through all layers
+    for layer in model.layers:
+        if hasattr(layer, 'layers'):  # It's a nested model
+            try:
+                return layer.get_layer(layer_name)
+            except ValueError:
+                # Go deeper
+                result = find_layer_recursive(layer, layer_name)
+                if result is not None:
+                    return result
+    return None
 
-def get_gradcam_heatmap(img_array, model, last_conv_layer_name):
+def get_last_conv_layer_name(model):
+    """
+    Finds the last convolutional layer in the model, searching recursively.
+    Returns (layer_object, layer_name) tuple.
+    """
+    conv_layers = []
+    
+    def collect_conv_layers(layer):
+        if isinstance(layer, (tf.keras.layers.Conv2D, tf.keras.layers.DepthwiseConv2D)):
+            conv_layers.append(layer)
+        if hasattr(layer, 'layers'):
+            for sub_layer in layer.layers:
+                collect_conv_layers(sub_layer)
+    
+    collect_conv_layers(model)
+    
+    if conv_layers:
+        last_conv = conv_layers[-1]
+        return last_conv, last_conv.name
+    return None, None
+
+def get_gradcam_heatmap(img_array, model, target_layer):
     """
     Generates a Grad-CAM heatmap for the given image and model.
     Uses the tumour probability (single sigmoid output) as the target score.
     """
     grad_model = tf.keras.models.Model(
         [model.inputs],
-        [model.get_layer(last_conv_layer_name).output, model.output]
+        [target_layer.output, model.output]
     )
 
     with tf.GradientTape() as tape:
         last_conv_layer_output, preds = grad_model(img_array, training=False)
-        # For binary sigmoid output, target is the tumour probability (index 0)
         class_channel = preds[:, 0]
 
     grads = tape.gradient(class_channel, last_conv_layer_output)
@@ -99,7 +135,6 @@ def get_gradcam_heatmap(img_array, model, last_conv_layer_name):
     heatmap = last_conv_layer_output @ pooled_grads[..., tf.newaxis]
     heatmap = tf.squeeze(heatmap)
 
-    # Normalize: ReLU then scale to [0, 1]
     heatmap = tf.maximum(heatmap, 0)
     max_val = tf.reduce_max(heatmap)
     if max_val > 0:
@@ -107,7 +142,6 @@ def get_gradcam_heatmap(img_array, model, last_conv_layer_name):
     return heatmap.numpy()
 
 def create_superimposed_image(original_image, heatmap, alpha=0.4):
-    """Overlays the heatmap onto the original image using JET colormap."""
     heatmap_resized = cv2.resize(heatmap, (original_image.width, original_image.height))
     heatmap_uint8 = np.uint8(255 * heatmap_resized)
     heatmap_colored = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
@@ -285,7 +319,7 @@ if image_to_process is not None:
     for res in results:
         st.write(f"- **{res['model']}**: {res['prediction']} ({res['confidence']:.2f}% probability)")
         
-    # --- 5. GRAD-CAM HEATMAP (Using the model with highest confidence) ---
+    # --- 5. GRAD-CAM HEATMAP ---
     st.markdown("---")
     st.subheader("Explainable AI: Tumor Localization (Grad-CAM)")
     st.write(
@@ -293,7 +327,6 @@ if image_to_process is not None:
         "It highlights the regions of the MRI that most strongly influenced the prediction."
     )
     
-    # Pick the model with the highest confidence
     best_model_result = max(results, key=lambda r: r["confidence"])
     best_model_name = best_model_result["model"]
     best_model = models[best_model_name]
@@ -301,38 +334,30 @@ if image_to_process is not None:
     st.write(f"**Using model:** {best_model_name} (confidence: {best_model_result['confidence']:.2f}%)")
     
     try:
-        # Get the verified Grad-CAM layer name for this model
-        gradcam_layer_name = GRADCAM_LAYER_MAP.get(best_model_name)
+        # Automatically find the last conv layer (works for all architectures)
+        target_layer, layer_name = get_last_conv_layer_name(best_model)
         
-        if gradcam_layer_name is None:
-            st.warning(f"No Grad-CAM layer mapping defined for {best_model_name}.")
-        else:
-            # Verify the layer exists in the loaded model
-            try:
-                layer = best_model.get_layer(gradcam_layer_name)
-            except ValueError:
-                st.warning(f"Layer '{gradcam_layer_name}' not found in {best_model_name}. Available layers: {[l.name for l in best_model.layers[:5]]}...")
-                layer = None
+        if target_layer is not None:
+            st.write(f"**Target layer:** {layer_name} (type: {type(target_layer).__name__})")
             
-            if layer is not None:
-                img_resized = image_to_process.resize((224, 224))
-                img_array = np.expand_dims(np.asarray(img_resized, dtype=np.float32), axis=0)
-                
-                heatmap = get_gradcam_heatmap(img_array, best_model, gradcam_layer_name)
-                superimposed_img = create_superimposed_image(image_to_process, heatmap)
-                
-                col_orig, col_heat = st.columns(2)
-                with col_orig:
-                    st.image(image_to_process, caption="Original MRI", use_container_width=True)
-                with col_heat:
-                    st.image(superimposed_img, caption=f"Grad-CAM Heatmap ({best_model_name})", use_container_width=True)
-                
-                # Show the raw heatmap separately for clarity
-                st.markdown("**Raw attention map:**")
-                heatmap_uint8 = np.uint8(255 * cv2.resize(heatmap, (image_to_process.width, image_to_process.height)))
-                st.image(heatmap_uint8, caption="Normalized Grad-CAM Heatmap", use_container_width=True)
-            else:
-                st.warning(f"Could not locate the Grad-CAM target layer in {best_model_name}.")
+            img_resized = image_to_process.resize((224, 224))
+            img_array = np.expand_dims(np.asarray(img_resized, dtype=np.float32), axis=0)
+            
+            heatmap = get_gradcam_heatmap(img_array, best_model, target_layer)
+            superimposed_img = create_superimposed_image(image_to_process, heatmap)
+            
+            col_orig, col_heat = st.columns(2)
+            with col_orig:
+                st.image(image_to_process, caption="Original MRI", use_container_width=True)
+            with col_heat:
+                st.image(superimposed_img, caption=f"Grad-CAM Heatmap ({best_model_name})", use_container_width=True)
+            
+            # Raw heatmap
+            st.markdown("**Raw attention map:**")
+            heatmap_uint8 = np.uint8(255 * cv2.resize(heatmap, (image_to_process.width, image_to_process.height)))
+            st.image(heatmap_uint8, caption="Normalized Grad-CAM Heatmap", use_container_width=True)
+        else:
+            st.warning(f"Could not find any convolutional layer in {best_model_name}.")
     except Exception as e:
         st.warning(f"Could not generate heatmap: {e}")
 
