@@ -170,7 +170,7 @@ if uploaded_file is not None:
     st.session_state['selected_sample'] = None 
     is_sample_scan = False
 else:
-    st.markdown("### 🖼️ Select a sample scan to test (Click an image):")
+    st.markdown("### Select a sample scan to test (Click an image):")
     col1, col2, col3, col4 = st.columns(4)
     
     samples = [
@@ -183,7 +183,7 @@ else:
     for col, (path, name) in zip([col1, col2, col3, col4], samples):
         with col:
             is_selected = (st.session_state['selected_sample'] == path)
-            caption = "✅ Selected" if is_selected else name
+            caption = "Selected" if is_selected else name
             st.image(path, caption=caption, use_container_width=True)
             
             btn_key = f"select_{path}"
@@ -205,7 +205,7 @@ else:
 if image_to_process is not None:
     
     if not is_valid_brain_mri(image_to_process):
-        st.error("⚠️ **Invalid Scan Detected**")
+        st.error("**Invalid Scan Detected**")
         st.warning("The image does not appear to be a valid axial brain MRI scan. Please upload a proper brain MRI image.")
         st.stop()
 
@@ -235,8 +235,6 @@ if image_to_process is not None:
         non_tumour_votes = 3 - tumour_votes
 
     # --- DISPLAY CONSENSUS RESULTS ---
-    st.subheader(" Final Consensus Prediction")
-
     if tumour_votes >= 2:
         consensus_class = "Tumourous"
         agreement = tumour_votes
@@ -249,18 +247,7 @@ if image_to_process is not None:
     st.markdown(f"### {consensus_class} ({confidence_level})")
     st.info(f"**Consensus:** {agreement}/3 models agree this is a **{consensus_class.lower()}** scan ({confidence_level}).")
 
-    st.subheader("📊 Individual Model Breakdown")
-    for res in results:
-        icon = "🧠" if res["prediction"] == "Tumour" else "✅"
-        st.write(f"- **{res['model']}**: {icon} {res['prediction']} ({res['confidence']:.2f}% probability)")
-
-    # --- 5. GRAD-CAM HEATMAP DISPLAY ---
-    # We generate the heatmap using the EfficientNetB0 model for explainability
-    if consensus_class == "Tumourous":
-        st.markdown("---")
-        st.subheader("🔍 Explainable AI: Where is the model looking?")
-        st.write("The heatmap below highlights the regions of the brain that most influenced the 'Tumour' prediction.")
-        
+    st.subheader("Individual Model Breakdown")
         try:
             eff_model = models["EfficientNetB0"]
             last_conv_name = get_last_conv_layer_name(eff_model)
