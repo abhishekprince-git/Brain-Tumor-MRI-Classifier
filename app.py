@@ -73,13 +73,34 @@ def is_valid_brain_mri(pil_image):
 # -----------------------------
 def get_last_conv_layer_name(model):
     """
-    Finds the last Conv2D layer in the model.
-    Uses isinstance check for robustness instead of output_shape.
+    Finds the appropriate target layer for Grad-CAM based on model architecture.
+    Handles Conv2D, DepthwiseConv2D, and nested models.
     """
-    for layer in reversed(model.layers):
-        if isinstance(layer, tf.keras.layers.Conv2D):
-            return layer.name
-    return None
+    candidates = []
+    
+    for layer in model.layers:
+        # Check for various convolution types used in different architectures
+        if isinstance(layer, (
+            tf.keras.layers.Conv2D,
+            tf.keras.layers.DepthwiseConv2D,
+            tf.keras.layers.SeparableConv2D
+        )):
+            candidates.append(layer)
+        # Recursively search nested models (like EfficientNet base)
+        elif isinstance(layer, tf.keras.Model):
+            nested = get_last_conv_layer_name(layer)
+            if nested:
+                candidates.append(nested)
+    
+    if not candidates:
+        # Fallback: find any layer with 4D output (spatial features)
+        for layer in reversed(model.layers):
+            if hasattr(layer, 'output') and len(layer.output.shape) == 4:
+                return layer.name
+        return None
+    
+    # Return the name of the last convolutional layer found
+    return candidates[-1].name
 
 def get_gradcam_heatmap(img_array, model, last_conv_layer_name, pred_index=None):
     grad_model = tf.keras.models.Model(
