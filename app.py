@@ -41,66 +41,6 @@ GREEN, RED, AMBER = "#2e9e6b", "#d9534f", "#e0a030"
 _v = tuple(int(p) for p in st.__version__.split(".")[:2] if p.isdigit())
 STRETCH = {"width": "stretch"} if _v >= (1, 50) else {"use_container_width": True}
 
-# =====================================================
-# Styling (light + dark friendly)
-# =====================================================
-st.markdown(
-    """
-    <style>
-    .block-container {padding-top: 1.6rem; padding-bottom: 3rem; max-width: 1250px;}
-
-    .hero {
-        padding: 2.2rem 2.4rem; border-radius: 20px; margin-bottom: 1.2rem;
-        background: linear-gradient(135deg, rgba(88,101,242,0.25), rgba(46,158,107,0.18));
-        border: 1px solid rgba(128,128,128,0.25);
-    }
-    .hero h1 {margin: 0 0 .4rem 0; font-size: 2.4rem;}
-    .hero p {margin: 0; opacity: .85; font-size: 1.05rem; max-width: 780px;}
-    .pill {
-        display: inline-block; padding: .18rem .75rem; margin: .9rem .4rem 0 0;
-        border-radius: 999px; font-size: .78rem; font-weight: 600;
-        background: rgba(128,128,128,0.18); border: 1px solid rgba(128,128,128,0.25);
-    }
-
-    .stat-card {
-        padding: .9rem 1rem; border-radius: 14px; text-align: center;
-        background: rgba(128,128,128,0.08); border: 1px solid rgba(128,128,128,0.2);
-    }
-    .stat-card .v {font-size: 1.5rem; font-weight: 700;}
-    .stat-card .l {font-size: .75rem; text-transform: uppercase; letter-spacing: .07em; opacity: .65;}
-
-    .result-card {padding: 1.3rem 1.5rem; border-radius: 16px; margin-bottom: 1rem;
-        border: 1px solid rgba(128,128,128,0.25);}
-    .result-card.tumour {background: rgba(217,83,79,0.13); border-color: rgba(217,83,79,0.5);}
-    .result-card.clear  {background: rgba(46,158,107,0.13); border-color: rgba(46,158,107,0.5);}
-    .result-label {font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; opacity: .7;}
-    .result-value {font-size: 2.1rem; font-weight: 700; line-height: 1.2; margin: .15rem 0 .3rem 0;}
-    .result-sub {opacity: .8; font-size: .95rem;}
-
-    .prob-line {display: flex; gap: .8rem; flex-wrap: wrap; margin: .4rem 0 .8rem 0;}
-    .prob-chip {
-        flex: 1; min-width: 180px; padding: .8rem 1rem; border-radius: 12px;
-        font-weight: 700; font-size: 1.15rem; border: 1px solid rgba(128,128,128,0.25);
-    }
-    .prob-chip.t {background: rgba(217,83,79,0.12); border-color: rgba(217,83,79,0.45);}
-    .prob-chip.n {background: rgba(46,158,107,0.12); border-color: rgba(46,158,107,0.45);}
-
-    .bar-wrap {margin: .55rem 0;}
-    .bar-head {display: flex; justify-content: space-between; font-weight: 600; margin-bottom: .25rem;}
-    .bar-track {position: relative; width: 100%; height: 14px; border-radius: 999px;
-        background: rgba(128,128,128,0.2);}
-    .bar-fill {height: 100%; border-radius: 999px;}
-    .bar-mark {position: absolute; top: -4px; width: 2px; height: 22px; background: currentColor; opacity: .7;}
-
-    .step-card {padding: 1.1rem 1.2rem; border-radius: 14px; height: 100%;
-        background: rgba(128,128,128,0.08); border: 1px solid rgba(128,128,128,0.2);}
-    .step-card h4 {margin: 0 0 .4rem 0;}
-    .footer {text-align: center; opacity: .6; font-size: .85rem; margin-top: 2.5rem;}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 
 # =====================================================
 # Model loading
