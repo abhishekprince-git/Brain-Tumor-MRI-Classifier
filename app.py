@@ -437,43 +437,42 @@ with tab_analyze:
         # Validate the uploaded or selected image before classification
         is_valid, validation_message = is_valid_brain_mri(image)
 
-    if not is_valid:
-        st.error(
-            "Invalid or potentially non-brain image. "
-            "Please upload a suitable brain MRI."
-        )
-        st.caption(f"Validation details: {validation_message}")
-        st.stop()
-
-    try:
-        model = load_model()
-    except Exception as exc:
-        st.error(f"Could not load the model: {exc}")
-        st.stop()
-
-    with st.spinner("Running prediction and generating Grad-CAM..."):
-        try:
-            result = run_analysis(model, image)
-            result["key"] = image_key(image)
-            st.session_state["analysis"] = result
-
-            st.session_state.setdefault("history", []).append(
-                {
-                    "Time": datetime.now().strftime("%H:%M:%S"),
-                    "Image": source_name,
-                    "Tumourous %": round(
-                        result["tumour_probability"] * 100, 2
-                    ),
-                    "Non-Tumourous %": round(
-                        (1 - result["tumour_probability"]) * 100, 2
-                    ),
-                    "Threshold": threshold,
-                }
+        if not is_valid:
+            st.error(
+                "Invalid or potentially non-brain image. "
+                "Please upload a suitable brain MRI."
             )
-
-        except Exception as exc:
-            st.error(f"Prediction failed: {exc}")
+            st.caption(f"Validation details: {validation_message}")
             st.stop()
+
+        try:
+            model = load_model()
+        except Exception as exc:
+            st.error(f"Could not load the model: {exc}")
+            st.stop()
+
+        with st.spinner("Running prediction and generating Grad-CAM..."):
+            try:
+                result = run_analysis(model, image)
+                result["key"] = image_key(image)
+                st.session_state["analysis"] = result
+
+                st.session_state.setdefault("history", []).append(
+                    {
+                        "Time": datetime.now().strftime("%H:%M:%S"),
+                        "Image": source_name,
+                        "Tumourous %": round(
+                            result["tumour_probability"] * 100, 2
+                        ),
+                        "Non-Tumourous %": round(
+                            (1 - result["tumour_probability"]) * 100, 2
+                        ),
+                        "Threshold": threshold,
+                    }
+                )
+            except Exception as exc:
+                st.error(f"Prediction failed: {exc}")
+                st.stop()
 
     analysis = st.session_state.get("analysis")
     has_result = (
@@ -503,7 +502,6 @@ with tab_analyze:
                 unsafe_allow_html=True,
             )
 
-            # Exactly: Tumourous: 19.08% / Non-Tumourous: 80.92%
             st.markdown(
                 f"""
                 <div class="prob-line">
