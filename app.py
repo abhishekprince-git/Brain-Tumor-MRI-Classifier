@@ -248,30 +248,30 @@ if image_to_process is not None:
     st.info(f"**Consensus:** {agreement}/3 models agree this is a **{consensus_class.lower()}** scan ({confidence_level}).")
 
     st.subheader("Individual Model Breakdown")
-        try:
-            eff_model = models["EfficientNetB0"]
-            last_conv_name = get_last_conv_layer_name(eff_model)
+    try:
+        eff_model = models["EfficientNetB0"]
+        last_conv_name = get_last_conv_layer_name(eff_model)
+        
+        if last_conv_name:
+            # Prepare image array for the model (same as predict_mri)
+            img_resized = image_to_process.resize((224, 224))
+            img_array = np.expand_dims(np.asarray(img_resized, dtype=np.float32), axis=0)
             
-            if last_conv_name:
-                # Prepare image array for the model (same as predict_mri)
-                img_resized = image_to_process.resize((224, 224))
-                img_array = np.expand_dims(np.asarray(img_resized, dtype=np.float32), axis=0)
-                
-                heatmap = get_gradcam_heatmap(img_array, eff_model, last_conv_name)
-                superimposed_img = create_superimposed_image(image_to_process, heatmap)
-                
-                # Display side-by-side
-                col_orig, col_heat = st.columns(2)
-                with col_orig:
-                    st.image(image_to_process, caption="Original MRI", use_container_width=True)
-                with col_heat:
-                    st.image(superimposed_img, caption="Grad-CAM Heatmap (EfficientNetB0)", use_container_width=True)
-            else:
-                st.warning("Could not find a convolutional layer for Grad-CAM.")
-        except Exception as e:
-            st.warning(f"Could not generate heatmap: {e}")
+            heatmap = get_gradcam_heatmap(img_array, eff_model, last_conv_name)
+            superimposed_img = create_superimposed_image(image_to_process, heatmap)
+            
+            # Display side-by-side
+            col_orig, col_heat = st.columns(2)
+            with col_orig:
+                st.image(image_to_process, caption="Original MRI", use_container_width=True)
+            with col_heat:
+                st.image(superimposed_img, caption="Grad-CAM Heatmap (EfficientNetB0)", use_container_width=True)
+        else:
+            st.warning("Could not find a convolutional layer for Grad-CAM.")
+    except Exception as e:
+        st.warning(f"Could not generate heatmap: {e}")
 
-    st.caption(
-        "⚠️ This is an experimental AI classification, not a medical diagnosis. "
-        "A qualified radiologist must interpret MRI scans for clinical decisions."
-    )
+st.caption(
+    "⚠️ This is an experimental AI classification, not a medical diagnosis. "
+    "A qualified radiologist must interpret MRI scans for clinical decisions."
+)
