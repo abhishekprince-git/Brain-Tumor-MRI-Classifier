@@ -2,9 +2,10 @@ import os
 import streamlit as st
 import tensorflow as tf
 import numpy as np
-from PIL import Image
-from huggingface_hub import hf_hub_download
+from PIL import Image, UnidentifiedImageError 
 import cv2
+from matplotlib import cm
+from huggingface_hub import hf_hub_download
 
 # -----------------------------
 # Page Configuration
@@ -18,32 +19,35 @@ st.set_page_config(
 # -----------------------------
 # Skull Boundary Check
 # -----------------------------
-def is_valid_brain_mri(pil_image, min_area_ratio=0.10, max_area_ratio=0.95, min_circularity=0.15):
+def is_valid_brain_mri(pil_image):
     """
-    Performs a basic skull/brain boundary check.
-    Relaxed thresholds to accommodate various MRI styles.
+    Robust check for valid brain MRI.
+    Handles edge cases: white borders, inverted colors, solid shapes, and complex photos.
     """
-    img_array = np.array(pil_image.convert("L"))
+    # Resize to a standard size for consistent math (faster and more stable)
+    img_resized = pil_image.resize((512, 512))
+    img_array = np.array(img_resized.convert("L"))
     h, w = img_array.shape
     total_area = h * w
     
-    # Crop center 90% to ignore borders/text that might confuse contour detection
-    margin_h, margin_w = int(h * 0.05), int(w * 0.05)
-    cropped = img_array[margin_h:h-margin_h, margin_w:w-margin_w]
-    cropped_area = cropped.shape[0] * cropped.shape[1]
-    
-    blurred = cv2.GaussianBlur(cropped, (5, 5), 0)
+    # EDGE CASE 1: Solid Color Check (e.g., a solid red circle)
+    if np.std(img_array) < 15:
+        return False
+
+    # Thresholding
+    blurred = cv2.GaussianBlur(img_array, (5, 5), 0)
     _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    
     if not contours:
         return False
         
     largest_contour = max(contours, key=cv2.contourArea)
     area = cv2.contourArea(largest_contour)
-    area_ratio = area / cropped_area
+    area_ratio = area / total_area
     
+    # EDGE CASE 2: Inverted Colors / White Backgrounds
+    # If the largest contour is basically the whole image, the colors might be inverted.
     if area_ratio > 0.90:
         _, thresh = cv2.threshold(blurred, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
         contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -51,19 +55,33 @@ def is_valid_brain_mri(pil_image, min_area_ratio=0.10, max_area_ratio=0.95, min_
             return False
         largest_contour = max(contours, key=cv2.contourArea)
         area = cv2.contourArea(largest_contour)
-        area_ratio = area / cropped_area
+        area_ratio = area / total_area
 
-    if not (min_area_ratio < area_ratio < max_area_ratio):
+    # Check if area ratio is within expected bounds for a brain scan
+    if not (0.10 < area_ratio < 0.75):
         return False
         
+    # Check circularity
     perimeter = cv2.arcLength(largest_contour, True)
     if perimeter == 0:
         return False
-        
     circularity = 4 * np.pi * area / (perimeter * perimeter)
     
-    return circularity >= min_circularity
+    # A brain is an oval (0.4 to 0.95). Rejects perfect circles (1.0) and complex shapes like people (<0.4)
+    if not (0.4 <= circularity <= 0.95):
+        return False
 
+    # EDGE CASE 3: Texture Check (Standard Deviation inside the brain)
+    mask = np.zeros(img_array.shape, dtype=np.uint8)
+    cv2.drawContours(mask, [largest_contour], -1, 255, -1)
+    mean, std_dev = cv2.meanStdDev(img_array, mask=mask)
+    
+    # Brain tissue has folds (high texture). A solid logo or smooth shape will have low std_dev.
+    if std_dev[0] < 20:
+        return False
+
+    return True
+    
 # -----------------------------
 # Model Loading Functions
 # -----------------------------
@@ -148,9 +166,28 @@ image_to_process = None
 is_sample_scan = False
 
 if uploaded_file is not None:
-    image_to_process = Image.open(uploaded_file).convert("RGB")
-    st.session_state['selected_sample'] = None # Clear sample if user uploads
-    is_sample_scan = False
+    try:
+        # Safe loading to handle corrupted files
+        raw_image = Image.open(uploaded_file)
+        
+        # EDGE CASE 4: Handle RGBA (transparent) or Grayscale images
+        if raw_image.mode == 'RGBA':
+            # Create a white background and paste the image onto it
+            background = Image.new('RGB', raw_image.size, (255, 255, 255))
+            background.paste(raw_image, mask=raw_image.split()[3])
+            image_to_process = background
+        else:
+            image_to_process = raw_image.convert('RGB')
+            
+        st.session_state['selected_sample'] = None 
+        is_sample_scan = False
+        
+    except UnidentifiedImageError:
+        st.error("**Corrupted File:** The uploaded file is not a valid image or is corrupted. Please upload a standard JPG or PNG.")
+        st.stop()
+    except Exception as e:
+        st.error(f"**Error reading file:** {e}")
+        st.stop()
 else:
     # --- 4. CLICKABLE SAMPLE GRID ---
     st.markdown("### Select a sample scan to test :")
@@ -167,7 +204,7 @@ else:
         with col:
             # Highlight logic: If this is the selected sample, show a green caption
             is_selected = (st.session_state['selected_sample'] == path)
-            caption = "✅ Selected" if is_selected else name
+            caption = "Selected" if is_selected else name
             
             st.image(path, caption=caption, use_container_width=True)
             
@@ -194,7 +231,7 @@ if image_to_process is not None:
     
     # 1. INVALID SCAN CHECK
     if not is_valid_brain_mri(image_to_process):
-        st.error("⚠️ **Invalid Scan Detected**")
+        st.error("**Invalid Scan Detected**")
         st.warning("The image does not appear to be a valid axial brain MRI scan. Please upload a proper brain MRI image.")
         st.stop()
 
@@ -207,7 +244,7 @@ if image_to_process is not None:
     )
 
     # 3. CONSENSUS PREDICTION (Auto-runs)
-    with st.spinner("🧠 Running analysis across 3 models..."):
+    with st.spinner("Running analysis across 3 models..."):
         models = load_all_models()
         
         if len(models) < 3:
@@ -245,12 +282,9 @@ if image_to_process is not None:
     st.markdown(f"### {consensus_class} ({confidence_level})")
     st.info(f"**Consensus:** {agreement}/3 models agree this is a **{consensus_class.lower()}** scan ({confidence_level}).")
 
-    st.subheader("📊 Individual Model Breakdown")
-    for res in results:
-        icon = "🧠" if res["prediction"] == "Tumour" else "✅"
-        st.write(f"- **{res['model']}**: {icon} {res['prediction']} ({res['confidence']:.2f}% probability)")
+    st.subheader("Individual Model Breakdown")
 
     st.caption(
-        "⚠️ This is an experimental AI classification, not a medical diagnosis. "
+        "This is an experimental AI classification, not a medical diagnosis. "
         "A qualified radiologist must interpret MRI scans for clinical decisions."
     )
