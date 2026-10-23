@@ -41,66 +41,6 @@ GREEN, RED, AMBER = "#2e9e6b", "#d9534f", "#e0a030"
 _v = tuple(int(p) for p in st.__version__.split(".")[:2] if p.isdigit())
 STRETCH = {"width": "stretch"} if _v >= (1, 50) else {"use_container_width": True}
 
-# =====================================================
-# Styling (light + dark friendly)
-# =====================================================
-st.markdown(
-    """
-    <style>
-    .block-container {padding-top: 1.6rem; padding-bottom: 3rem; max-width: 1250px;}
-
-    .hero {
-        padding: 2.2rem 2.4rem; border-radius: 20px; margin-bottom: 1.2rem;
-        background: linear-gradient(135deg, rgba(88,101,242,0.25), rgba(46,158,107,0.18));
-        border: 1px solid rgba(128,128,128,0.25);
-    }
-    .hero h1 {margin: 0 0 .4rem 0; font-size: 2.4rem;}
-    .hero p {margin: 0; opacity: .85; font-size: 1.05rem; max-width: 780px;}
-    .pill {
-        display: inline-block; padding: .18rem .75rem; margin: .9rem .4rem 0 0;
-        border-radius: 999px; font-size: .78rem; font-weight: 600;
-        background: rgba(128,128,128,0.18); border: 1px solid rgba(128,128,128,0.25);
-    }
-
-    .stat-card {
-        padding: .9rem 1rem; border-radius: 14px; text-align: center;
-        background: rgba(128,128,128,0.08); border: 1px solid rgba(128,128,128,0.2);
-    }
-    .stat-card .v {font-size: 1.5rem; font-weight: 700;}
-    .stat-card .l {font-size: .75rem; text-transform: uppercase; letter-spacing: .07em; opacity: .65;}
-
-    .result-card {padding: 1.3rem 1.5rem; border-radius: 16px; margin-bottom: 1rem;
-        border: 1px solid rgba(128,128,128,0.25);}
-    .result-card.tumour {background: rgba(217,83,79,0.13); border-color: rgba(217,83,79,0.5);}
-    .result-card.clear  {background: rgba(46,158,107,0.13); border-color: rgba(46,158,107,0.5);}
-    .result-label {font-size: .8rem; text-transform: uppercase; letter-spacing: .08em; opacity: .7;}
-    .result-value {font-size: 2.1rem; font-weight: 700; line-height: 1.2; margin: .15rem 0 .3rem 0;}
-    .result-sub {opacity: .8; font-size: .95rem;}
-
-    .prob-line {display: flex; gap: .8rem; flex-wrap: wrap; margin: .4rem 0 .8rem 0;}
-    .prob-chip {
-        flex: 1; min-width: 180px; padding: .8rem 1rem; border-radius: 12px;
-        font-weight: 700; font-size: 1.15rem; border: 1px solid rgba(128,128,128,0.25);
-    }
-    .prob-chip.t {background: rgba(217,83,79,0.12); border-color: rgba(217,83,79,0.45);}
-    .prob-chip.n {background: rgba(46,158,107,0.12); border-color: rgba(46,158,107,0.45);}
-
-    .bar-wrap {margin: .55rem 0;}
-    .bar-head {display: flex; justify-content: space-between; font-weight: 600; margin-bottom: .25rem;}
-    .bar-track {position: relative; width: 100%; height: 14px; border-radius: 999px;
-        background: rgba(128,128,128,0.2);}
-    .bar-fill {height: 100%; border-radius: 999px;}
-    .bar-mark {position: absolute; top: -4px; width: 2px; height: 22px; background: currentColor; opacity: .7;}
-
-    .step-card {padding: 1.1rem 1.2rem; border-radius: 14px; height: 100%;
-        background: rgba(128,128,128,0.08); border: 1px solid rgba(128,128,128,0.2);}
-    .step-card h4 {margin: 0 0 .4rem 0;}
-    .footer {text-align: center; opacity: .6; font-size: .85rem; margin-top: 2.5rem;}
-    </style>
-    """,
-    unsafe_allow_html=True,
-)
-
 
 # =====================================================
 # Model loading
@@ -110,6 +50,75 @@ def load_model():
     if not MODEL_PATH.exists():
         raise FileNotFoundError(f"Model file not found: {MODEL_PATH}")
     return tf.keras.models.load_model(str(MODEL_PATH), compile=False)
+
+
+# =====================================================
+# Brain MRI Validation (OpenCV)
+# =====================================================
+def is_valid_brain_mri(image: Image.Image):
+    """
+    Heuristic validation to help reject invalid or non-brain images.
+    Checks image standard deviation, largest contour, circularity,
+    and contour area ratio.
+
+    Returns:
+        (is_valid, message)
+    """
+    try:
+        # Convert image to grayscale
+        gray = np.array(image.convert("L"))
+
+        # Reject images with insufficient intensity variation
+        if gray.std() < 10:
+            return False, "Image has insufficient intensity variation."
+
+        # Apply Gaussian blur and Otsu thresholding
+        blurred = cv2.GaussianBlur(gray, (5, 5), 0)
+        _, binary = cv2.threshold(
+            blurred, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
+        )
+
+        # Find external contours
+        contours, _ = cv2.findContours(
+            binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        )
+
+        if not contours:
+            return False, "No significant image contour detected."
+
+        # Select the largest contour
+        largest_contour = max(contours, key=cv2.contourArea)
+
+        contour_area = cv2.contourArea(largest_contour)
+        image_area = gray.shape[0] * gray.shape[1]
+
+        if image_area == 0 or contour_area <= 0:
+            return False, "Invalid image dimensions or contour."
+
+        # Calculate contour area ratio
+        area_ratio = contour_area / image_area
+
+        # Calculate circularity
+        perimeter = cv2.arcLength(largest_contour, True)
+
+        if perimeter <= 0:
+            return False, "Invalid contour perimeter."
+
+        circularity = (
+            4 * np.pi * contour_area / (perimeter ** 2)
+        )
+
+        # Heuristic checks; calibrate against your MRI dataset
+        if area_ratio < 0.10 or area_ratio > 0.95:
+            return False, "Image contour area is outside the expected range."
+
+        if circularity < 0.10:
+            return False, "Image contour shape is unsuitable."
+
+        return True, "Image passed basic structural validation."
+
+    except Exception as exc:
+        return False, f"Image validation failed: {exc}"
 
 
 # =====================================================
@@ -397,7 +406,7 @@ with tab_analyze:
 
     image, source_name = None, None
     with left:
-        st.subheader("1 · Choose an MRI")
+        st.subheader("Choose an MRI")
         available_samples = [p for p in SAMPLE_IMAGES if p.exists()]
         options = ["Upload my own image"] + [p.name for p in available_samples]
         source = st.selectbox("Image source", options)
@@ -419,35 +428,53 @@ with tab_analyze:
 
         if image is not None:
             st.image(image, caption=f"Selected MRI · {image.width}×{image.height}px", **STRETCH)
-            analyze_clicked = st.button("🔬 Analyze MRI", type="primary", **STRETCH)
+            analyze_clicked = st.button("Analyze MRI", type="primary", **STRETCH)
         else:
             analyze_clicked = False
             st.info("Select a sample or upload an MRI image to begin.")
 
     if image is not None and analyze_clicked:
-        try:
-            model = load_model()
-        except Exception as exc:
-            st.error(f"Could not load the model: {exc}")
-            st.stop()
 
-        with st.spinner("Running prediction and generating Grad-CAM..."):
-            try:
-                result = run_analysis(model, image)
-                result["key"] = image_key(image)
-                st.session_state["analysis"] = result
-                st.session_state.setdefault("history", []).append(
-                    {
-                        "Time": datetime.now().strftime("%H:%M:%S"),
-                        "Image": source_name,
-                        "Tumourous %": round(result["tumour_probability"] * 100, 2),
-                        "Non-Tumourous %": round((1 - result["tumour_probability"]) * 100, 2),
-                        "Threshold": threshold,
-                    }
-                )
-            except Exception as exc:
-                st.error(f"Prediction failed: {exc}")
-                st.stop()
+    # Validate the uploaded or selected image before classification
+    is_valid, validation_message = is_valid_brain_mri(image)
+
+    if not is_valid:
+        st.error(
+            "Invalid or potentially non-brain image. "
+            "Please upload a suitable brain MRI."
+        )
+        st.caption(f"Validation details: {validation_message}")
+        st.stop()
+
+    try:
+        model = load_model()
+    except Exception as exc:
+        st.error(f"Could not load the model: {exc}")
+        st.stop()
+
+    with st.spinner("Running prediction and generating Grad-CAM..."):
+        try:
+            result = run_analysis(model, image)
+            result["key"] = image_key(image)
+            st.session_state["analysis"] = result
+
+            st.session_state.setdefault("history", []).append(
+                {
+                    "Time": datetime.now().strftime("%H:%M:%S"),
+                    "Image": source_name,
+                    "Tumourous %": round(
+                        result["tumour_probability"] * 100, 2
+                    ),
+                    "Non-Tumourous %": round(
+                        (1 - result["tumour_probability"]) * 100, 2
+                    ),
+                    "Threshold": threshold,
+                }
+            )
+
+        except Exception as exc:
+            st.error(f"Prediction failed: {exc}")
+            st.stop()
 
     analysis = st.session_state.get("analysis")
     has_result = (
@@ -455,7 +482,7 @@ with tab_analyze:
     )
 
     with right:
-        st.subheader("2 · Result")
+        st.subheader("Result")
         if not has_result:
             st.caption("The prediction will appear here after you click **Analyze MRI**.")
         else:
