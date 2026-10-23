@@ -283,4 +283,35 @@ if image_to_process is not None:
         
     # --- 5. GRAD-CAM HEATMAP GENERATION ---
     st.markdown("---")
-    st.subheader("Explainable
+    st.subheader("Explainable AI: Tumor Localization (Grad-CAM)")
+    st.write("The heatmap highlights the regions of the MRI that most strongly influenced the EfficientNetB0 model's prediction.")
+    
+    try:
+        eff_model = models["EfficientNetB0"]
+        last_conv_name = get_last_conv_layer_name(eff_model)
+        
+        if last_conv_name:
+            # Debug info (optional, helps verify layer found)
+            # st.write(f"Using Conv layer: {last_conv_name}")
+            
+            img_resized = image_to_process.resize((224, 224))
+            img_array = np.expand_dims(np.asarray(img_resized, dtype=np.float32), axis=0)
+            
+            heatmap = get_gradcam_heatmap(img_array, eff_model, last_conv_name)
+            superimposed_img = create_superimposed_image(image_to_process, heatmap)
+            
+            col_orig, col_heat = st.columns(2)
+            with col_orig:
+                st.image(image_to_process, caption="Original MRI", use_container_width=True)
+            with col_heat:
+                st.image(superimposed_img, caption="Grad-CAM Heatmap Overlay", use_container_width=True)
+        else:
+            st.warning("Could not find a Conv2D layer in the model for Grad-CAM.")
+    except Exception as e:
+        st.warning(f"Could not generate heatmap: {e}")
+
+st.markdown("---")
+st.caption(
+    "Disclaimer: This is an experimental AI classification tool and not a medical diagnosis. "
+    "A qualified radiologist must interpret MRI scans for all clinical decisions."
+)
