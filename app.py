@@ -166,31 +166,11 @@ image_to_process = None
 is_sample_scan = False
 
 if uploaded_file is not None:
-    try:
-        # Safe loading to handle corrupted files
-        raw_image = Image.open(uploaded_file)
-        
-        # EDGE CASE 4: Handle RGBA (transparent) or Grayscale images
-        if raw_image.mode == 'RGBA':
-            # Create a white background and paste the image onto it
-            background = Image.new('RGB', raw_image.size, (255, 255, 255))
-            background.paste(raw_image, mask=raw_image.split()[3])
-            image_to_process = background
-        else:
-            image_to_process = raw_image.convert('RGB')
-            
-        st.session_state['selected_sample'] = None 
-        is_sample_scan = False
-        
-    except UnidentifiedImageError:
-        st.error("**Corrupted File:** The uploaded file is not a valid image or is corrupted. Please upload a standard JPG or PNG.")
-        st.stop()
-    except Exception as e:
-        st.error(f"**Error reading file:** {e}")
-        st.stop()
+    image_to_process = Image.open(uploaded_file).convert("RGB")
+    st.session_state['selected_sample'] = None 
+    is_sample_scan = False
 else:
-    # --- 4. CLICKABLE SAMPLE GRID ---
-    st.markdown("### Select a sample scan to test :")
+    st.markdown("### 🖼️ Select a sample scan to test (Click an image):")
     col1, col2, col3, col4 = st.columns(4)
     
     samples = [
@@ -202,20 +182,15 @@ else:
     
     for col, (path, name) in zip([col1, col2, col3, col4], samples):
         with col:
-            # Highlight logic: If this is the selected sample, show a green caption
             is_selected = (st.session_state['selected_sample'] == path)
             caption = "Selected" if is_selected else name
-            
             st.image(path, caption=caption, use_container_width=True)
             
-            # The button acts as the clickable area for the image
-            # We use a small key based on the path to ensure uniqueness
             btn_key = f"select_{path}"
             if st.button("Select this scan", key=btn_key, use_container_width=True, type="primary" if is_selected else "secondary"):
                 st.session_state['selected_sample'] = path
-                st.rerun() # Instantly refresh to show selection and predict
+                st.rerun()
 
-    # Load the selected sample for processing
     if st.session_state['selected_sample']:
         try:
             image_to_process = Image.open(st.session_state['selected_sample']).convert("RGB")
@@ -224,27 +199,19 @@ else:
             st.error("Selected sample image not found.")
             st.stop()
     else:
-        st.stop() # Wait for user to upload or select
+        st.stop()
 
-# --- 5. MAIN PREDICTION FLOW (Runs automatically after selection) ---
+# --- 4. MAIN PREDICTION FLOW ---
 if image_to_process is not None:
     
-    # 1. INVALID SCAN CHECK
     if not is_valid_brain_mri(image_to_process):
         st.error("**Invalid Scan Detected**")
         st.warning("The image does not appear to be a valid axial brain MRI scan. Please upload a proper brain MRI image.")
         st.stop()
 
-    # 2. DISPLAY IMAGE (Larger view of the selected/uploaded image)
     st.markdown("---")
-    st.image(
-        image_to_process,
-        caption="Analyzing: Sample Scan" if is_sample_scan else "Analyzing: Uploaded MRI",
-        use_container_width=True
-    )
-
-    # 3. CONSENSUS PREDICTION (Auto-runs)
-    with st.spinner("Running analysis across 3 models..."):
+    
+    with st.spinner(" Running analysis across 3 models..."):
         models = load_all_models()
         
         if len(models) < 3:
@@ -267,7 +234,7 @@ if image_to_process is not None:
 
         non_tumour_votes = 3 - tumour_votes
 
-    # --- DISPLAY RESULTS ---
+    # --- DISPLAY CONSENSUS RESULTS ---
     st.subheader(" Final Consensus Prediction")
 
     if tumour_votes >= 2:
@@ -283,7 +250,40 @@ if image_to_process is not None:
     st.info(f"**Consensus:** {agreement}/3 models agree this is a **{consensus_class.lower()}** scan ({confidence_level}).")
 
     st.subheader("Individual Model Breakdown")
+    # --- 5. GRAD-CAM HEATMAP DISPLAY ---
+    # We generate the heatmap using the EfficientNetB0 model for explainability
+    if consensus_class == "Tumourous":
+        st.markdown("---")
+        st.subheader("🔍 Explainable AI: Where is the model looking?")
+        st.write("The heatmap below highlights the regions of the brain that most influenced the 'Tumour' prediction.")
+        
+        try:
+            eff_model = models["EfficientNetB0"]
+            last_conv_name = get_last_conv_layer_name(eff_model)
+            
+            if last_conv_name:
+                # Prepare image array for the model (same as predict_mri)
+                img_resized = image_to_process.resize((224, 224))
+                img_array = np.expand_dims(np.asarray(img_resized, dtype=np.float32), axis=0)
+                
+                heatmap = get_gradcam_heatmap(img_array, eff_model, last_conv_name)
+                superimposed_img = create_superimposed_image(image_to_process, heatmap)
+                
+                # Display side-by-side
+                col_orig, col_heat = st.columns(2)
+                with col_orig:
+                    st.image(image_to_process, caption="Original MRI", use_container_width=True)
+                with col_heat:
+                    st.image(superimposed_img, caption="Grad-CAM Heatmap (EfficientNetB0)", use_container_width=True)
+            else:
+                st.warning("Could not find a convolutional layer for Grad-CAM.")
+        except Exception as e:
+            st.warning(f"Could not generate heatmap: {e}")
 
+    st.caption(
+        "This is an experimental AI classification, not a medical diagnosis. "
+        "A qualified radiologist must interpret MRI scans for clinical decisions."
+    )
     st.caption(
         "This is an experimental AI classification, not a medical diagnosis. "
         "A qualified radiologist must interpret MRI scans for clinical decisions."
