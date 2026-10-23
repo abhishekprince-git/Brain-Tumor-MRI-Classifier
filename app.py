@@ -1,5 +1,5 @@
-import os
 from pathlib import Path
+
 import cv2
 import numpy as np
 import streamlit as st
@@ -17,51 +17,90 @@ st.set_page_config(
 
 IMG_SIZE = (224, 224)
 THRESHOLD = 0.5
-MODEL_PATH = os.environ.get(
-    "BRAIN_TUMOR_MODEL_PATH",
-    str(Path(__file__).parent / "models" / "efficientnetb0_final.keras"),
-)
+PROJECT_DIR = Path(__file__).resolve().parent
+MODEL_DIR = PROJECT_DIR / "models"
+ASSETS_DIR = PROJECT_DIR / "assets"
+
+# Model configuration.
+# Only models that actually exist in the repo are listed here.
+# To add another model later, add one more entry with its file path.
+MODEL_CONFIG = {
+    "EfficientNetB0": {
+        "path": MODEL_DIR / "efficientnetb0_final.keras",
+    },
+}
+
+# Name of the model used for Grad-CAM
+GRADCAM_MODEL_NAME = "EfficientNetB0"
+
+# Sample images in assets/ folder
+SAMPLE_IMAGES = [
+    ASSETS_DIR / "sample_1.jpg",
+    ASSETS_DIR / "sample_2.jpg",
+    ASSETS_DIR / "sample_3.jpg",
+    ASSETS_DIR / "sample_4.jpg",
+]
+
 
 # -----------------------------
 # Model loading
 # -----------------------------
-@st.cache_resource(show_spinner="Loading EfficientNetB0 model...")
-def load_model(model_path: str):
-    """Load the saved Keras model once per Streamlit session."""
-    path = Path(model_path)
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Model file not found: {path}. Place your trained model at "
-            "'models/efficientnetb0_final.keras' or set BRAIN_TUMOR_MODEL_PATH."
-        )
-    return tf.keras.models.load_model(str(path), compile=False)
+@st.cache_resource(show_spinner="Loading classification model...")
+def load_all_models():
+    """Load every configured model that exists; report problems without hiding them."""
+    loaded = {}
+    errors = {}
+
+    for name, config in MODEL_CONFIG.items():
+        model_path = config["path"]
+
+        if not model_path.exists():
+            errors[name] = f"Model file not found: {model_path}"
+            continue
+
+        try:
+            loaded[name] = tf.keras.models.load_model(
+                str(model_path), compile=False
+            )
+        except Exception as exc:
+            errors[name] = str(exc)
+
+    return loaded, errors
+
 
 # -----------------------------
 # Image preprocessing and prediction
 # -----------------------------
 def preprocess_image(image: Image.Image) -> np.ndarray:
-    """Prepare RGB input. This assumes training used float32 RGB pixels in [0, 255]."""
+    """Prepare RGB input. Training used float32 RGB pixels in [0, 255]."""
     resized = image.convert("RGB").resize(IMG_SIZE)
     array = np.asarray(resized, dtype=np.float32)
     return np.expand_dims(array, axis=0)
 
 
-def predict_binary(model, batch: np.ndarray):
-    """Return tumour probability, predicted label, and predicted-class score."""
+def predict_one_model(model, batch):
+    """Return tumour probability, class label, and predicted-class score."""
     output = model(batch, training=False)
     output = np.asarray(output).reshape(-1)
 
     if output.size != 1:
         raise ValueError(
-            f"This app expects a binary model with one output, but got "
-            f"{output.size} outputs. Check model.output_shape."
+            f"Expected one sigmoid output for binary classification; "
+            f"received {output.size}."
         )
 
     tumour_probability = float(np.clip(output[0], 0.0, 1.0))
     is_tumour = tumour_probability >= THRESHOLD
-    predicted_label = "Tumourous" if is_tumour else "Non-Tumourous"
-    predicted_score = tumour_probability if is_tumour else 1.0 - tumour_probability
-    return tumour_probability, predicted_label, predicted_score
+
+    return {
+        "label": "Tumourous" if is_tumour else "Non-Tumourous",
+        "tumour_probability": tumour_probability,
+        "non_tumour_probability": 1.0 - tumour_probability,
+        "confidence": (
+            tumour_probability if is_tumour else 1.0 - tumour_probability
+        ),
+    }
+
 
 # -----------------------------
 # Grad-CAM helpers
@@ -75,11 +114,9 @@ def find_last_conv_layer(model):
             if isinstance(child, (tf.keras.layers.Conv2D, tf.keras.layers.DepthwiseConv2D)):
                 candidates.append((child, owner))
             if getattr(child, "layers", None):
-                # The first nested model below the outer model owns this layer.
                 next_owner = child if owner is None else owner
                 walk(child, next_owner)
 
-    # Include top-level convolutional layers and nested backbones in layer order.
     for layer in model.layers:
         if isinstance(layer, (tf.keras.layers.Conv2D, tf.keras.layers.DepthwiseConv2D)):
             candidates.append((layer, None))
@@ -89,6 +126,7 @@ def find_last_conv_layer(model):
     if not candidates:
         return None, None
     return candidates[-1]
+
 
 def build_gradcam_model(model, target_layer, backbone):
     """
@@ -127,7 +165,8 @@ def build_gradcam_model(model, target_layer, backbone):
         inputs=model.inputs,
         outputs=[activations, x],
     )
-    
+
+
 def make_gradcam_heatmap(batch: np.ndarray, model, target_layer, backbone, tumour_class: bool):
     """Create a normalized Grad-CAM heatmap for the selected binary class."""
     grad_model = build_gradcam_model(model, target_layer, backbone)
@@ -156,6 +195,7 @@ def make_gradcam_heatmap(batch: np.ndarray, model, target_layer, backbone, tumou
     )
     return heatmap.numpy()
 
+
 def overlay_heatmap(image: Image.Image, heatmap: np.ndarray, alpha: float = 0.38):
     """Overlay a Grad-CAM heatmap on the original MRI image."""
     original = np.asarray(image.convert("RGB"))
@@ -170,6 +210,7 @@ def overlay_heatmap(image: Image.Image, heatmap: np.ndarray, alpha: float = 0.38
     )
     overlay = (1.0 - alpha) * original.astype(np.float32) + alpha * colored.astype(np.float32)
     return np.clip(overlay, 0, 255).astype(np.uint8), heatmap_uint8
+
 
 # -----------------------------
 # User interface
@@ -187,98 +228,161 @@ st.info(
 
 with st.sidebar:
     st.header("Model settings")
-    st.write("Model: EfficientNetB0")
+    st.write("Model: " + ", ".join(MODEL_CONFIG.keys()))
     st.write(f"Decision threshold: {THRESHOLD:.2f}")
-    st.caption("The model must be the same binary model used during training.")
     st.caption("Preprocessing assumes RGB, 224 × 224, float32 pixel values in [0, 255].")
 
-uploaded_file = st.file_uploader(
-    "Upload a brain MRI image",
-    type=["png", "jpg", "jpeg"],
-    help="Use an MRI image compatible with the data used to train the model.",
+
+# Let the user choose a sample MRI or upload their own image.
+st.subheader("Try a sample MRI or upload your own")
+
+available_samples = [path for path in SAMPLE_IMAGES if path.exists()]
+sample_options = ["Upload my own MRI"] + [path.name for path in available_samples]
+
+selected_sample = st.selectbox(
+    "Choose a sample image or upload your own",
+    sample_options,
 )
 
-if uploaded_file is not None:
-    try:
-        image = Image.open(uploaded_file).convert("RGB")
-    except Exception as exc:
-        st.error(f"Could not read the uploaded image: {exc}")
+uploaded_file = None
+if selected_sample == "Upload my own MRI":
+    uploaded_file = st.file_uploader(
+        "Upload a brain MRI image",
+        type=["png", "jpg", "jpeg"],
+    )
+
+image = None
+
+if selected_sample != "Upload my own MRI":
+    selected_path = next(
+        path for path in available_samples if path.name == selected_sample
+    )
+    image = Image.open(selected_path).convert("RGB")
+elif uploaded_file is not None:
+    image = Image.open(uploaded_file).convert("RGB")
+
+if image is not None:
+    st.image(image, caption="MRI selected for analysis", width=420)
+
+
+# Run the classifier(s), display predictions, and generate Grad-CAM.
+if image is not None and st.button("Analyze MRI", type="primary"):
+    batch = preprocess_image(image)
+
+    with st.spinner("Loading model and running prediction..."):
+        models, load_errors = load_all_models()
+
+    for model_name, error in load_errors.items():
+        st.warning(f"{model_name} could not be loaded: {error}")
+
+    if not models:
+        st.error("No models loaded. Check the files inside your models folder.")
         st.stop()
 
-    st.subheader("Uploaded image")
-    st.image(image, caption="Input MRI", width=420)
+    results = {}
 
-    if st.button("Analyze MRI", type="primary"):
+    for model_name, keras_model in models.items():
         try:
-            model = load_model(MODEL_PATH)
-            batch = preprocess_image(image)
+            results[model_name] = predict_one_model(keras_model, batch)
+        except Exception as exc:
+            st.warning(f"Prediction failed for {model_name}: {exc}")
 
-            with st.spinner("Running prediction..."):
-                tumour_probability, predicted_label, predicted_score = predict_binary(model, batch)
+    if not results:
+        st.error("All model predictions failed.")
+        st.stop()
 
-            col1, col2, col3 = st.columns(3)
-            col1.metric("Predicted class", predicted_label)
-            col2.metric("Predicted-class score", f"{predicted_score * 100:.2f}%")
-            col3.metric("Tumour probability", f"{tumour_probability * 100:.2f}%")
+    st.divider()
 
-            st.subheader("Binary class probabilities")
-            st.progress(float(tumour_probability), text=f"Tumourous: {tumour_probability * 100:.2f}%")
-            st.progress(
-                float(1.0 - tumour_probability),
-                text=f"Non-Tumourous: {(1.0 - tumour_probability) * 100:.2f}%",
-            )
+    # ----- Prediction display -----
+    if len(results) == 1:
+        # Single-model case (current setup)
+        model_name, result = next(iter(results.items()))
 
-            st.caption(
-                "These are model outputs, not necessarily calibrated clinical probabilities. "
-                "A binary model cannot provide separate glioma, meningioma, and pituitary probabilities."
-            )
+        st.subheader("Prediction")
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Predicted class", result["label"])
+        col2.metric("Model", model_name)
+        col3.metric("Predicted-class score", f"{result['confidence'] * 100:.2f}%")
 
-            st.divider()
-            st.subheader("Explainable AI: Grad-CAM")
-            st.write(
-                "Grad-CAM highlights image regions that influenced the selected class score. "
-                "It is not a tumour segmentation mask."
-            )
+        st.write(f"Tumourous: {result['tumour_probability'] * 100:.2f}%")
+        st.write(f"Non-Tumourous: {result['non_tumour_probability'] * 100:.2f}%")
+    else:
+        # Multi-model case (only used if more models are added to MODEL_CONFIG)
+        consensus_name = max(results, key=lambda name: results[name]["confidence"])
+        consensus = results[consensus_name]
 
-            try:
-                target_layer, backbone = find_last_conv_layer(model)
-                if target_layer is None:
-                    st.warning("No Conv2D or DepthwiseConv2D layer was found in this model.")
-                else:
-                    st.caption(f"Target layer: {target_layer.name}")
-                    with st.spinner("Generating Grad-CAM heatmap..."):
-                        heatmap = make_gradcam_heatmap(
-                            batch,
-                            model,
-                            target_layer,
-                            backbone,
-                            tumour_class=(predicted_label == "Tumourous"),
-                        )
-                        overlay, raw_heatmap = overlay_heatmap(image, heatmap)
+        st.subheader("Final consensus prediction")
+        st.metric("Predicted class", consensus["label"])
+        st.metric("Selected model", consensus_name)
+        st.metric(
+            "Selected model's predicted-class score",
+            f"{consensus['confidence'] * 100:.2f}%",
+        )
+        st.caption(
+            "Selection rule: choose the model with the highest predicted-class "
+            "score among the available models. This is not a calibrated ensemble "
+            "or proof that the selected prediction is correct."
+        )
 
-                    original_col, overlay_col, raw_col = st.columns(3)
-                    with original_col:
-                        st.image(image, caption="Original MRI", use_container_width=True)
-                    with overlay_col:
-                        st.image(overlay, caption="Grad-CAM overlay", use_container_width=True)
-                    with raw_col:
-                        st.image(raw_heatmap, caption="Grad-CAM heatmap", use_container_width=True)
+        st.subheader("Compare model predictions")
+        columns = st.columns(len(results))
+        for column, (model_name, result) in zip(columns, results.items()):
+            with column:
+                st.markdown(f"**{model_name}**")
+                st.write(f"Prediction: **{result['label']}**")
+                st.metric("Predicted-class score", f"{result['confidence'] * 100:.2f}%")
+                st.write(f"Tumourous: {result['tumour_probability'] * 100:.2f}%")
+                st.write(f"Non-Tumourous: {result['non_tumour_probability'] * 100:.2f}%")
 
-            except Exception as exc:
-                st.warning(f"Prediction succeeded, but Grad-CAM failed: {exc}")
-                st.code(
-                    "If this continues, share the full terminal traceback and "
-                    "the model.summary() output so the target layer can be selected "
-                    "for this exact architecture."
+    # ----- Grad-CAM (EfficientNetB0 only) -----
+    st.divider()
+    st.subheader("Explainable AI: Grad-CAM")
+
+    if GRADCAM_MODEL_NAME not in models:
+        st.warning(f"{GRADCAM_MODEL_NAME} is unavailable, so Grad-CAM cannot be generated.")
+    elif GRADCAM_MODEL_NAME not in results:
+        st.warning(f"{GRADCAM_MODEL_NAME} prediction failed, so Grad-CAM cannot be generated.")
+    else:
+        gradcam_model = models[GRADCAM_MODEL_NAME]
+        gradcam_result = results[GRADCAM_MODEL_NAME]
+
+        try:
+            target_layer, backbone = find_last_conv_layer(gradcam_model)
+
+            if target_layer is None:
+                st.warning("No convolutional target layer was found.")
+            else:
+                st.caption(
+                    f"Grad-CAM model: {GRADCAM_MODEL_NAME} · "
+                    f"Target layer: {target_layer.name}"
                 )
 
-        except FileNotFoundError as exc:
-            st.error(str(exc))
+                with st.spinner(f"Generating {GRADCAM_MODEL_NAME} Grad-CAM..."):
+                    heatmap = make_gradcam_heatmap(
+                        batch,
+                        gradcam_model,
+                        target_layer,
+                        backbone,
+                        tumour_class=(gradcam_result["label"] == "Tumourous"),
+                    )
+                    overlay, _ = overlay_heatmap(image, heatmap)
+
+                original_col, heatmap_col = st.columns(2)
+
+                with original_col:
+                    st.image(image, caption="Original MRI", use_container_width=True)
+
+                with heatmap_col:
+                    st.image(
+                        overlay,
+                        caption="Heatmap (Grad-CAM overlay)",
+                        use_container_width=True,
+                    )
+
+                st.caption(
+                    f"The heatmap explains {GRADCAM_MODEL_NAME}'s prediction. "
+                    "It is not a tumour segmentation mask."
+                )
+
         except Exception as exc:
-            st.error(f"Could not analyze this image: {exc}")
-            st.caption("Check the model path, dependencies, and preprocessing used during training.")
-st.divider()
-st.caption(
-    "Educational research application • Not validated for clinical diagnosis • "
-    "Grad-CAM provides qualitative model explanations only"
-)
+            st.warning(f"{GRADCAM_MODEL_NAME} Grad-CAM failed: {exc}")
