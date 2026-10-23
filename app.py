@@ -434,9 +434,8 @@ with tab_analyze:
             st.info("Select a sample or upload an MRI image to begin.")
 
     if image is not None and analyze_clicked:
-
-    # Validate the uploaded or selected image before classification
-    is_valid, validation_message = is_valid_brain_mri(image)
+        # Validate the uploaded or selected image before classification
+        is_valid, validation_message = is_valid_brain_mri(image)
 
     if not is_valid:
         st.error(
