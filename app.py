@@ -248,6 +248,9 @@ if image_to_process is not None:
     st.info(f"**Consensus:** {agreement}/3 models agree this is a **{consensus_class.lower()}** scan ({confidence_level}).")
 
     st.subheader("Individual Model Breakdown")
+    for res in results:
+        st.write(f"- **{res['model']}**: {res['prediction']} ({res['confidence']:.2f}% probability)")
+        
     try:
         eff_model = models["EfficientNetB0"]
         last_conv_name = get_last_conv_layer_name(eff_model)
