@@ -21,19 +21,20 @@ PROJECT_DIR = Path(__file__).resolve().parent
 MODEL_DIR = PROJECT_DIR / "models"
 ASSETS_DIR = PROJECT_DIR / "assets"
 
-# Model configuration.
-# Only models that actually exist in the repo are listed here.
-# To add another model later, add one more entry with its file path.
+# Display sizes (pixels). Change these to make images bigger/smaller.
+PREVIEW_WIDTH = 240      # MRI preview shown after selecting/uploading
+GRADCAM_WIDTH = 260      # Original MRI + Grad-CAM overlay
+
+# All models used for the prediction / majority vote
 MODEL_CONFIG = {
-    "EfficientNetB0": {
-        "path": MODEL_DIR / "efficientnetb0_final.keras",
-    },
+    "EfficientNetB0": {"path": MODEL_DIR / "efficientnetb0_final.keras"},
+    "ConvNeXt-BCE": {"path": MODEL_DIR / "convnext_tiny_bce.keras"},
+    "ConvNeXt-Focal": {"path": MODEL_DIR / "convnext_tiny_focal.keras"},
 }
 
-# Name of the model used for Grad-CAM
+# Grad-CAM is generated ONLY for this model
 GRADCAM_MODEL_NAME = "EfficientNetB0"
 
-# Sample images in assets/ folder
 SAMPLE_IMAGES = [
     ASSETS_DIR / "sample_1.jpg",
     ASSETS_DIR / "sample_2.jpg",
@@ -45,7 +46,7 @@ SAMPLE_IMAGES = [
 # -----------------------------
 # Model loading
 # -----------------------------
-@st.cache_resource(show_spinner="Loading classification model...")
+@st.cache_resource(show_spinner="Loading classification models...")
 def load_all_models():
     """Load every configured model that exists; report problems without hiding them."""
     loaded = {}
@@ -55,7 +56,7 @@ def load_all_models():
         model_path = config["path"]
 
         if not model_path.exists():
-            errors[name] = f"Model file not found: {model_path}"
+            errors[name] = f"Model file not found: {model_path.name}"
             continue
 
         try:
@@ -100,6 +101,26 @@ def predict_one_model(model, batch):
             tumour_probability if is_tumour else 1.0 - tumour_probability
         ),
     }
+
+
+def majority_vote(results: dict):
+    """
+    Majority vote across the models that produced a prediction.
+    Returns (label, tumour_votes, total_votes, used_tiebreak).
+    A tie (possible only with an even number of models) is broken by the
+    average tumour probability.
+    """
+    total = len(results)
+    tumour_votes = sum(r["label"] == "Tumourous" for r in results.values())
+
+    if tumour_votes * 2 > total:
+        return "Tumourous", tumour_votes, total, False
+    if tumour_votes * 2 < total:
+        return "Non-Tumourous", tumour_votes, total, False
+
+    mean_prob = float(np.mean([r["tumour_probability"] for r in results.values()]))
+    label = "Tumourous" if mean_prob >= THRESHOLD else "Non-Tumourous"
+    return label, tumour_votes, total, True
 
 
 # -----------------------------
@@ -217,8 +238,9 @@ def overlay_heatmap(image: Image.Image, heatmap: np.ndarray, alpha: float = 0.38
 # -----------------------------
 st.title("Brain MRI Classification")
 st.write(
-    "Upload a brain MRI image to obtain a binary model prediction and a Grad-CAM "
-    "visualization of image regions that influenced that prediction."
+    "Upload a brain MRI image to obtain a binary prediction from multiple models, "
+    "a majority-vote result, and a Grad-CAM visualization of image regions that "
+    "influenced the EfficientNetB0 prediction."
 )
 
 st.info(
@@ -228,7 +250,9 @@ st.info(
 
 with st.sidebar:
     st.header("Model settings")
-    st.write("Model: " + ", ".join(MODEL_CONFIG.keys()))
+    st.write("Models: " + ", ".join(MODEL_CONFIG.keys()))
+    st.write("Consensus: majority vote")
+    st.write(f"Grad-CAM model: {GRADCAM_MODEL_NAME}")
     st.write(f"Decision threshold: {THRESHOLD:.2f}")
     st.caption("Preprocessing assumes RGB, 224 × 224, float32 pixel values in [0, 255].")
 
@@ -262,18 +286,18 @@ elif uploaded_file is not None:
     image = Image.open(uploaded_file).convert("RGB")
 
 if image is not None:
-    st.image(image, caption="MRI selected for analysis", width=420)
+    st.image(image, caption="MRI selected for analysis", width=PREVIEW_WIDTH)
 
 
-# Run the classifier(s), display predictions, and generate Grad-CAM.
+# Run all classifiers, show each prediction, the majority vote, and Grad-CAM.
 if image is not None and st.button("Analyze MRI", type="primary"):
     batch = preprocess_image(image)
 
-    with st.spinner("Loading model and running prediction..."):
+    with st.spinner("Loading models and running predictions..."):
         models, load_errors = load_all_models()
 
     for model_name, error in load_errors.items():
-        st.warning(f"{model_name} could not be loaded: {error}")
+        st.warning(f"{model_name} could not be loaded and was skipped: {error}")
 
     if not models:
         st.error("No models loaded. Check the files inside your models folder.")
@@ -291,48 +315,50 @@ if image is not None and st.button("Analyze MRI", type="primary"):
         st.error("All model predictions failed.")
         st.stop()
 
+    # ----- Majority-vote consensus -----
+    final_label, tumour_votes, total_votes, used_tiebreak = majority_vote(results)
+    agreeing = tumour_votes if final_label == "Tumourous" else total_votes - tumour_votes
+    mean_tumour_prob = float(np.mean([r["tumour_probability"] for r in results.values()]))
+
     st.divider()
+    st.subheader("Final consensus prediction (majority vote)")
 
-    # ----- Prediction display -----
-    if len(results) == 1:
-        # Single-model case (current setup)
-        model_name, result = next(iter(results.items()))
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Consensus", final_label)
+    col2.metric("Models agreeing", f"{agreeing} / {total_votes}")
+    col3.metric("Average tumour probability", f"{mean_tumour_prob * 100:.2f}%")
 
-        st.subheader("Prediction")
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Predicted class", result["label"])
-        col2.metric("Model", model_name)
-        col3.metric("Predicted-class score", f"{result['confidence'] * 100:.2f}%")
+    st.write(
+        f"**{tumour_votes} of {total_votes}** models predict *Tumourous*; "
+        f"**{total_votes - tumour_votes} of {total_votes}** predict *Non-Tumourous*."
+    )
 
-        st.write(f"Tumourous: {result['tumour_probability'] * 100:.2f}%")
-        st.write(f"Non-Tumourous: {result['non_tumour_probability'] * 100:.2f}%")
-    else:
-        # Multi-model case (only used if more models are added to MODEL_CONFIG)
-        consensus_name = max(results, key=lambda name: results[name]["confidence"])
-        consensus = results[consensus_name]
-
-        st.subheader("Final consensus prediction")
-        st.metric("Predicted class", consensus["label"])
-        st.metric("Selected model", consensus_name)
-        st.metric(
-            "Selected model's predicted-class score",
-            f"{consensus['confidence'] * 100:.2f}%",
-        )
+    if used_tiebreak:
         st.caption(
-            "Selection rule: choose the model with the highest predicted-class "
-            "score among the available models. This is not a calibrated ensemble "
-            "or proof that the selected prediction is correct."
+            "The vote was tied, so the average tumour probability across models "
+            "was used as the tiebreaker."
         )
+    if total_votes < len(MODEL_CONFIG):
+        st.caption(
+            f"Only {total_votes} of {len(MODEL_CONFIG)} configured models were "
+            "available, so the vote uses those models."
+        )
+    st.caption(
+        "Majority voting is not a calibrated ensemble or proof that the "
+        "prediction is correct."
+    )
 
-        st.subheader("Compare model predictions")
-        columns = st.columns(len(results))
-        for column, (model_name, result) in zip(columns, results.items()):
-            with column:
-                st.markdown(f"**{model_name}**")
-                st.write(f"Prediction: **{result['label']}**")
-                st.metric("Predicted-class score", f"{result['confidence'] * 100:.2f}%")
-                st.write(f"Tumourous: {result['tumour_probability'] * 100:.2f}%")
-                st.write(f"Non-Tumourous: {result['non_tumour_probability'] * 100:.2f}%")
+    # ----- Individual model predictions -----
+    st.subheader("Individual model predictions")
+
+    columns = st.columns(len(results))
+    for column, (model_name, result) in zip(columns, results.items()):
+        with column:
+            st.markdown(f"**{model_name}**")
+            st.write(f"Prediction: **{result['label']}**")
+            st.metric("Predicted-class score", f"{result['confidence'] * 100:.2f}%")
+            st.write(f"Tumourous: {result['tumour_probability'] * 100:.2f}%")
+            st.write(f"Non-Tumourous: {result['non_tumour_probability'] * 100:.2f}%")
 
     # ----- Grad-CAM (EfficientNetB0 only) -----
     st.divider()
@@ -367,21 +393,22 @@ if image is not None and st.button("Analyze MRI", type="primary"):
                     )
                     overlay, _ = overlay_heatmap(image, heatmap)
 
-                original_col, heatmap_col = st.columns(2)
+                original_col, heatmap_col, _spacer = st.columns([1, 1, 2])
 
                 with original_col:
-                    st.image(image, caption="Original MRI", use_container_width=True)
+                    st.image(image, caption="Original MRI", width=GRADCAM_WIDTH)
 
                 with heatmap_col:
                     st.image(
                         overlay,
                         caption="Heatmap (Grad-CAM overlay)",
-                        use_container_width=True,
+                        width=GRADCAM_WIDTH,
                     )
 
                 st.caption(
-                    f"The heatmap explains {GRADCAM_MODEL_NAME}'s prediction. "
-                    "It is not a tumour segmentation mask."
+                    f"The heatmap explains {GRADCAM_MODEL_NAME}'s own prediction "
+                    f"({gradcam_result['label']}), which may differ from the "
+                    "majority vote. It is not a tumour segmentation mask."
                 )
 
         except Exception as exc:
