@@ -20,10 +20,6 @@ st.set_page_config(
 # Skull Boundary Check
 # -----------------------------
 def is_valid_brain_mri(pil_image):
-    """
-    Robust check for valid brain MRI.
-    Handles edge cases: white borders, inverted colors, solid shapes, and complex photos.
-    """
     img_resized = pil_image.resize((512, 512))
     img_array = np.array(img_resized.convert("L"))
     h, w = img_array.shape
@@ -73,19 +69,22 @@ def is_valid_brain_mri(pil_image):
     return True
 
 # -----------------------------
-# Grad-CAM Functions (Explainable AI)
+# Grad-CAM Functions
 # -----------------------------
 def get_last_conv_layer_name(model):
-    """Dynamically finds the last convolutional layer in the model."""
+    """
+    Finds the last Conv2D layer in the model.
+    Uses isinstance check for robustness instead of output_shape.
+    """
     for layer in reversed(model.layers):
-        if len(layer.output_shape) == 4:  # Conv2D layers have 4D output
+        if isinstance(layer, tf.keras.layers.Conv2D):
             return layer.name
     return None
 
 def get_gradcam_heatmap(img_array, model, last_conv_layer_name, pred_index=None):
-    """Generates the Grad-CAM heatmap for the given image and model."""
     grad_model = tf.keras.models.Model(
-        [model.inputs], [model.get_layer(last_conv_layer_name).output, model.output]
+        [model.inputs], 
+        [model.get_layer(last_conv_layer_name).output, model.output]
     )
 
     with tf.GradientTape() as tape:
@@ -105,7 +104,6 @@ def get_gradcam_heatmap(img_array, model, last_conv_layer_name, pred_index=None)
     return heatmap.numpy()
 
 def create_superimposed_image(original_image, heatmap, alpha=0.4):
-    """Overlays the heatmap onto the original image."""
     heatmap_resized = cv2.resize(heatmap, (original_image.width, original_image.height))
     heatmap_uint8 = np.uint8(255 * heatmap_resized)
     heatmap_colored = cv2.applyColorMap(heatmap_uint8, cv2.COLORMAP_JET)
@@ -285,32 +283,4 @@ if image_to_process is not None:
         
     # --- 5. GRAD-CAM HEATMAP GENERATION ---
     st.markdown("---")
-    st.subheader("Explainable AI: Tumor Localization (Grad-CAM)")
-    st.write("The heatmap highlights the regions of the MRI that most strongly influenced the EfficientNetB0 model's prediction.")
-    
-    try:
-        eff_model = models["EfficientNetB0"]
-        last_conv_name = get_last_conv_layer_name(eff_model)
-        
-        if last_conv_name:
-            img_resized = image_to_process.resize((224, 224))
-            img_array = np.expand_dims(np.asarray(img_resized, dtype=np.float32), axis=0)
-            
-            heatmap = get_gradcam_heatmap(img_array, eff_model, last_conv_name)
-            superimposed_img = create_superimposed_image(image_to_process, heatmap)
-            
-            col_orig, col_heat = st.columns(2)
-            with col_orig:
-                st.image(image_to_process, caption="Original MRI", use_container_width=True)
-            with col_heat:
-                st.image(superimposed_img, caption="Grad-CAM Heatmap Overlay", use_container_width=True)
-        else:
-            st.warning("Could not find a convolutional layer for Grad-CAM.")
-    except Exception as e:
-        st.warning(f"Could not generate heatmap: {e}")
-
-st.markdown("---")
-st.caption(
-    "Disclaimer: This is an experimental AI classification tool and not a medical diagnosis. "
-    "A qualified radiologist must interpret MRI scans for all clinical decisions."
-)
+    st.subheader("Explainable
