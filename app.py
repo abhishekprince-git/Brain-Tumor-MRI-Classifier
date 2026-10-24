@@ -486,7 +486,7 @@ with tab_analyze:
 
     image = None
     with left:
-        st.subheader("1 · Choose an MRI")
+        st.subheader("Choose an MRI")
         available_samples = [p for p in SAMPLE_IMAGES if p.exists()]
         options = ["Upload my own image"] + [p.name for p in available_samples]
         source = st.selectbox("Image source", options)
@@ -550,7 +550,7 @@ with tab_analyze:
 
     # ---- results column ----
     with right:
-        st.subheader("2 · Result")
+        st.subheader("Result")
         if not has_result:
             st.caption("The prediction will appear here after you click **Analyze MRI**.")
         elif is_invalid:
@@ -596,8 +596,6 @@ with tab_analyze:
                 + probability_bar("Non-Tumourous", res["non_tumour_probability"], GREEN),
                 unsafe_allow_html=True,
             )
-            st.write(f"Tumourous: {res['tumour_probability'] * 100:.2f}%")
-            st.write(f"Non-Tumourous: {res['non_tumour_probability'] * 100:.2f}%")
 
             if 0.35 <= res["tumour_probability"] <= 0.65:
                 st.warning(
