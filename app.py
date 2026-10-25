@@ -476,7 +476,7 @@ st.warning(
     "used for diagnosis. MRI scans must be interpreted by a qualified radiologist.",
 )
 
-tab_analyze, tab_how, tab_about = st.tabs(["🔍 Analyze", "🧪 How it works", "ℹ️ About & limitations"])
+tab_analyze, tab_how, tab_about = st.tabs(["Analyze", "How it works", "About & limitations"])
 
 # =====================================================
 # Tab 1: Analyze
@@ -507,7 +507,7 @@ with tab_analyze:
         if image is not None:
             st.image(image, caption="Selected MRI", use_container_width=True)
             analyze_clicked = st.button(
-                "🔬 Analyze MRI", type="primary", use_container_width=True
+                "Analyze MRI", type="primary", use_container_width=True
             )
         else:
             analyze_clicked = False
