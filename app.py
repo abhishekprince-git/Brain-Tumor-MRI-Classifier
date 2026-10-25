@@ -643,13 +643,7 @@ with tab_analyze:
                 "its prediction. This is **not** a tumour segmentation mask, and the "
                 "highlighted area is not guaranteed to be the true lesion."
             )
-
-            st.download_button(
-                "⬇️ Download overlay (PNG)",
-                data=to_png_bytes(overlay),
-                file_name="gradcam_overlay.png",
-                mime="image/png",
-            )
+            
 
 # =====================================================
 # Tab 2: How it works
