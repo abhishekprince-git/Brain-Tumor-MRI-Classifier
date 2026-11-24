@@ -12,7 +12,7 @@ A brain tumor is caused by the abnormal and uncontrolled growth of cells within 
 
 Traditionally, the diagnosis of brain tumors relies on manual visual inspection of MRI images by radiologists, or on a stereotactic biopsy in which a neurosurgeon drills into the skull to collect tissue for histological grading. While biopsy is considered the gold standard, it carries significant risks such as bleeding, infection, seizures, stroke, and in rare cases even death, and it is still not 100% accurate.
 
-This project proposes an automated approach using a **Convolutional Neural Network (CNN)** to classify MRI images as normal or abnormal (tumorous). The use of **transfer learning** with pre-trained architectures such as **VGG16** and **ResNet50** is also explored to improve classification accuracy and reduce training time, ultimately aiming to save radiologist time, reduce diagnostic error, and support timely treatment planning.
+This project proposes an automated approach using a **Convolutional Neural Network (CNN)** to classify MRI images as normal or abnormal (tumorous). The use of **transfer learning** with pre-trained architectures such as **ResNet50** is also explored to improve classification accuracy and reduce training time, ultimately aiming to save radiologist time, reduce diagnostic error, and support timely treatment planning.
 
 ---
 
